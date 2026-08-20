@@ -257,4 +257,17 @@ describe('MemorySpaceCatalogV1', () => {
       defaultWrite: true,
     })).rejects.toMatchObject({ code: 'DEFAULT_WRITE_SPACE_ALREADY_BOUND' })
   })
+
+  it('rejects a Memory Space ID that could escape its physical Archive directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-space-id-'))
+    const catalog = await openMemorySpaceCatalog({
+      path: join(root, 'catalog.json'),
+      createId: () => '../outside',
+    })
+
+    await expect(catalog.createSpace({
+      ownerId: 'owner-fixture',
+      name: 'Unsafe',
+    })).rejects.toMatchObject({ code: 'MEMORY_SPACE_ID_INVALID' })
+  })
 })

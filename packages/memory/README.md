@@ -1,6 +1,6 @@
 # `@mistymoon/dsh-memory`
 
-> Standalone migration status: the package now exports `MemorySpaceCatalogV1` as the first dsh-Mmem-owned seam. It persists Owner-governed Memory Spaces and binds them only to exact `cwd` evidence supplied by DSH `SessionHeader`; it does not create a parallel Workspace identity. Archive routing by Space and cross-space recall are not enabled yet.
+> Standalone migration status: the package exports `MemorySpaceCatalogV1` and `MemorySpaceArchiveRouterV1`. It binds Owner-governed Memory Spaces only to exact `cwd` evidence supplied by DSH `SessionHeader`, gives every Space a physically separate Archive, and routes DSH pre-step, tools, and candidate extraction through the Session's Active Space. Cross-space recall and Space-aware Settings governance are not enabled yet.
 
 This plugin owns MistyMoon's private cross-session companion memory. Every public archive operation requires a host-constructed `MemoryAccessContextV1`; model tool arguments cannot choose Owner, authority, scope, or disclosure policy. New candidates and records use domain schema v2 and reference an immutable Observation committed in the same storage transaction. They retain exact Owner/scope, memory kind, recorded time, optional validity bounds, visibility, source, and append-only revision state.
 

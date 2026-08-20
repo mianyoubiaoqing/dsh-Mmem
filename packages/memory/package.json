@@ -58,6 +58,10 @@
     "./space-catalog": {
       "types": "./lib/space-catalog.d.ts",
       "default": "./lib/space-catalog.js"
+    },
+    "./space-archive-router": {
+      "types": "./lib/space-archive-router.d.ts",
+      "default": "./lib/space-archive-router.js"
     }
   },
   "scripts": {

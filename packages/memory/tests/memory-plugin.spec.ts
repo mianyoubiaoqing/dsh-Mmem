@@ -31,6 +31,129 @@ function sessionAgent(session: Session): Agent {
 }
 
 describe('MistyMoon memory plugin', () => {
+  it('routes model-visible recall through the Active Space of the DSH Session Workspace', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-space-plugin-'))
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(MemoryPlugin, {
+      spaceCatalogPath: join(root, 'catalog.json'),
+      spacesRoot: join(root, 'spaces'),
+      recallLimit: 4,
+    })
+    const cwd = 'D:\\workspaces\\project-alpha'
+    const space = await ctx.dshMmemSpaceCatalog.createSpace({
+      ownerId: 'owner-fixture',
+      name: 'Project Alpha',
+    })
+    await ctx.dshMmemSpaceCatalog.bindDshWorkspace({
+      ownerId: 'owner-fixture',
+      sessionHeader: { cwd },
+      spaceId: space.id,
+      access: 'read-write',
+      defaultWrite: true,
+    })
+    const id = SessionId('space-routed-memory-session')
+    const session = Session.create(id, [], { version: 0, id, createdAt: 1, cwd })
+    const agent = sessionAgent(session)
+    const remember = createUserMessage({
+      content: [{ type: 'text', text: '请记住：Project Alpha 使用蓝绿部署。' }],
+      source: { kind: 'user', rpcId: 'rpc-space-remember' } as ReturnType<typeof createUserMessage>['source'],
+    })
+    session.append('turn/start', { turn: 1 })
+
+    const decision = await agentEvents(ctx, agent).waterfall(
+      'agent/pre-step',
+      { messages: [remember], turn: 1, step: 1, signal: new AbortController().signal },
+      () => Promise.resolve({ kind: 'enter' as const, messages: [remember] }),
+    )
+    if (decision.kind !== 'enter') throw new Error('space-routed memory unexpectedly rejected the step')
+    const projection = decision.messages.find(message => message.source.kind === 'plugin')
+    expect(projection?.content).toEqual([{
+      type: 'text',
+      text: expect.stringContaining(`space:${space.id}; binding:`),
+    }])
+  })
+
+  it('stores extracted candidates in the Active Space of the completed DSH Session', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-space-extraction-'))
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(MemoryPlugin, {
+      spaceCatalogPath: join(root, 'catalog.json'),
+      spacesRoot: join(root, 'spaces'),
+    })
+    const cwd = 'D:\\workspaces\\project-alpha'
+    const space = await ctx.dshMmemSpaceCatalog.createSpace({
+      ownerId: 'owner-fixture',
+      name: 'Project Alpha',
+    })
+    await ctx.dshMmemSpaceCatalog.bindDshWorkspace({
+      ownerId: 'owner-fixture',
+      sessionHeader: { cwd },
+      spaceId: space.id,
+      access: 'read-write',
+      defaultWrite: true,
+    })
+    let calls = 0
+    ctx.mistymoonMemoryCandidateExtraction.register({
+      id: 'space-fixture-provider',
+      version: '1.0.0',
+      executionKind: 'local-deterministic',
+      extract: async (request) => {
+        calls += 1
+        return {
+          schemaVersion: 1,
+          receipt: { kind: 'local-deterministic', implementationVersion: 'space-fixture-v1' },
+          drafts: [{
+            sourceMessageId: request.evidence[0]?.messageId,
+            content: 'Project Alpha 的中性候选。',
+            visibility: 'personal',
+            memoryKind: 'summary',
+          }],
+        }
+      },
+    })
+    const id = SessionId('space-extraction-session')
+    const session = Session.create(id, [], { version: 0, id, createdAt: 1, cwd })
+    const agent = sessionAgent(session)
+    const owner = createUserMessage({
+      content: [{ type: 'text', text: 'Project Alpha 有一个中性稳定事实。' }],
+      source: { kind: 'user', rpcId: 'rpc-space-extraction' } as ReturnType<typeof createUserMessage>['source'],
+    })
+    session.append('turn/start', { turn: 1 })
+    session.append('user/message', owner, { surfaceOp: 'append' })
+    session.append('step/start', { turn: 1, step: 1 })
+    session.append('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: '中性回复。' }],
+        source: { provider: 'fixture', model: 'fixture' },
+      }),
+    }, { surfaceOp: 'append', sourceEventSeqs: [] })
+
+    await agentEvents(ctx, agent).serial('agent/turn-stopping', {
+      turn: 1,
+      signal: new AbortController().signal,
+    })
+
+    const active = await ctx.dshMmemSpaceRouter.resolveSession({
+      ownerId: 'owner-fixture',
+      sessionHeader: session.header,
+    })
+    if (active.kind !== 'active') throw new Error('expected an Active Space')
+    expect(calls).toBe(1)
+    expect(active.listCandidates({ context: PERSONAL_COMPANION_ACCESS })).toEqual([
+      expect.objectContaining({ content: 'Project Alpha 的中性候选。', status: 'pending' }),
+    ])
+  })
+
   it('extracts pending candidates only after a completed top-level Owner reply', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mistymoon-memory-extraction-plugin-'))
     const ctx = new Context()

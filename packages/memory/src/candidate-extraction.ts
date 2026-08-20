@@ -209,7 +209,7 @@ async function providerCall(
 export async function extractMemoryCandidates(
   provider: CandidateExtractionProvider,
   request: CandidateExtractionRequestV1,
-  archive: CompanionMemoryArchive,
+  archive: Pick<CompanionMemoryArchive, 'proposeExtracted'>,
   options: { readonly signal: AbortSignal; readonly timeoutMs: number },
 ): Promise<MemoryCandidate[]> {
   const result = parseCandidateExtractionResultV1(
