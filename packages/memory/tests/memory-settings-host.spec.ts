@@ -19,6 +19,83 @@ type FixtureRpcHandler = (
 ) => Promise<unknown>
 
 describe('dsh-Mmem Settings Host RPC', () => {
+  it('creates a Memory Space and binds it to the current live DSH Workspace without browser cwd', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-space-onboarding-'))
+    let registration: { handler: FixtureRpcHandler } | undefined
+    const connection = {
+      rpc: {
+        handle(_channel: string, handler: FixtureRpcHandler) {
+          registration = { handler }
+          return async () => {}
+        },
+      },
+    }
+    const ctx = new Context()
+    ctx.effect(() => ctx.provide('connection', connection as never), 'fixture Connection RPC')
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(MemoryPlugin, {
+      spaceCatalogPath: join(root, 'catalog.json'),
+      spacesRoot: join(root, 'spaces'),
+      settingsPath: join(root, 'settings.json'),
+    })
+    await ctx.plugin(MemorySettingsHost)
+    const cwd = 'D:\\workspaces\\new-project'
+    const session = ctx.sessions.create(SessionId('space-onboarding-session'), { meta: { cwd } })
+    if (registration === undefined) throw new Error('expected Settings RPC registration')
+
+    await expect(registration.handler('spaces/get', {
+      sessionId: String(session.id),
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: { schemaVersion: 1, spaces: [], bindings: [] },
+    })
+    const created = await registration.handler('spaces/create', {
+      sessionId: String(session.id),
+      name: 'New Project',
+    }, new AbortController().signal) as {
+      ok: true
+      value: { spaces: Array<{ id: string }> }
+    }
+    expect(created).toMatchObject({
+      ok: true,
+      value: { spaces: [{ name: 'New Project' }], bindings: [] },
+    })
+    const spaceId = created.value.spaces[0]?.id
+    if (spaceId === undefined) throw new Error('expected created Space id')
+    await expect(registration.handler('spaces/bind', {
+      sessionId: String(session.id),
+      spaceId,
+      access: 'read-write',
+      defaultWrite: true,
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        spaces: [{ id: spaceId }],
+        bindings: [{
+          spaceId,
+          dshWorkspaceCwd: cwd,
+          access: 'read-write',
+          defaultWrite: true,
+        }],
+      },
+    })
+    await expect(registration.handler('spaces/bind', {
+      sessionId: String(session.id),
+      ownerId: 'browser-owner',
+      cwd: 'D:\\browser-controlled',
+      spaceId,
+      access: 'read-write',
+      defaultWrite: true,
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'bad-request' },
+    })
+  })
+
   it('reviews Candidates in the live DSH Session Active Space over a loopback-only channel', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-settings-host-'))
     let registration: {

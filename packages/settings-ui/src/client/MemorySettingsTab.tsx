@@ -8,6 +8,7 @@ import {
   type MemoryBatchRpcSnapshotV1,
   type MemoryManagementRpcSnapshotV1,
   type MemorySettingsRpcCallerV1,
+  type MemorySpaceSetupRpcSnapshotV1,
   type MemorySpaceSharingSettingsRpcSnapshotV1,
   type MemorySourceRpcSnapshotV1,
 } from '@mistymoon/dsh-memory/settings-client'
@@ -79,6 +80,12 @@ interface FederationDraftV1 {
   spaceIds: string[]
 }
 
+interface WorkspaceBindingDraftV1 {
+  spaceId: string
+  access: 'read' | 'read-write'
+  defaultWrite: boolean
+}
+
 const MEMORY_KINDS: readonly MemoryKind[] = [
   'preference',
   'biographical',
@@ -126,6 +133,9 @@ function SessionMemorySettingsTab({
   const [sharingDraft, setSharingDraft] = useState<SharingPolicyDraftV1>()
   const [grantDraft, setGrantDraft] = useState<GrantDraftV1>()
   const [federationDraft, setFederationDraft] = useState<FederationDraftV1>({ name: '', spaceIds: [] })
+  const [spaceSetup, setSpaceSetup] = useState<MemorySpaceSetupRpcSnapshotV1>()
+  const [spaceName, setSpaceName] = useState('')
+  const [bindingDraft, setBindingDraft] = useState<WorkspaceBindingDraftV1>()
   const [filters, setFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
   const [appliedFilters, setAppliedFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
 
@@ -136,6 +146,9 @@ function SessionMemorySettingsTab({
     setSharingDraft(undefined)
     setGrantDraft(undefined)
     setFederationDraft({ name: '', spaceIds: [] })
+    setSpaceSetup(undefined)
+    setSpaceName('')
+    setBindingDraft(undefined)
   }, [client])
 
   useEffect(() => {
@@ -437,9 +450,146 @@ function SessionMemorySettingsTab({
     )
   }
 
-  if (failed) return <p role="alert">{t('loadError')}</p>
+  const selectUnboundSpace = (result: MemorySpaceSetupRpcSnapshotV1): WorkspaceBindingDraftV1 | undefined => {
+    const bound = new Set(result.bindings.map(binding => binding.spaceId))
+    const spaceId = result.spaces.find(space => !bound.has(space.id))?.id
+    if (spaceId === undefined) return undefined
+    return {
+      spaceId,
+      access: 'read-write',
+      defaultWrite: !result.bindings.some(binding => binding.defaultWrite),
+    }
+  }
+
+  const openSpaceSetup = (): void => {
+    if (busy) return
+    setBusy(true)
+    void client.inspectSpaces().then(
+      result => {
+        setBusy(false)
+        setSpaceSetup(result)
+        setBindingDraft(selectUnboundSpace(result))
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
+  const createSpace = (): void => {
+    if (busy || spaceName.trim() === '') return
+    setBusy(true)
+    void client.createSpace(spaceName.trim()).then(
+      result => {
+        setBusy(false)
+        setSpaceSetup(result)
+        setSpaceName('')
+        setBindingDraft(selectUnboundSpace(result))
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
+  const bindCurrentDshWorkspace = (): void => {
+    if (busy || bindingDraft === undefined) return
+    setBusy(true)
+    void client.bindCurrentDshWorkspace(bindingDraft).then(
+      result => {
+        setBusy(false)
+        setFailed(false)
+        setSpaceSetup(result)
+        setBindingDraft(selectUnboundSpace(result))
+        setRefresh(value => value + 1)
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
+  const spaceSetupPanel = spaceSetup === undefined ? null : <fieldset>
+    <legend>{t('spaceSetup')}</legend>
+    <form aria-label={t('createSpaceForm')} onSubmit={(event) => {
+      event.preventDefault()
+      createSpace()
+    }}>
+      <input
+        type="text"
+        aria-label={t('spaceName')}
+        value={spaceName}
+        onChange={event => { setSpaceName(event.target.value) }}
+      />
+      <button type="submit" disabled={busy || spaceName.trim() === ''}>{t('createSpace')}</button>
+    </form>
+    {spaceSetup.spaces.length === 0 ? <p>{t('noSpaces')}</p> : <ul>
+      {spaceSetup.spaces.map(space => <li key={space.id}>
+        {space.name} · {space.id}
+        {spaceSetup.bindings.some(binding => binding.spaceId === space.id) ? ` · ${t('boundToCurrentWorkspace')}` : ''}
+      </li>)}
+    </ul>}
+    {bindingDraft === undefined ? null : <form aria-label={t('bindSpaceForm')} onSubmit={(event) => {
+      event.preventDefault()
+      bindCurrentDshWorkspace()
+    }}>
+      <select
+        aria-label={t('spaceToBind')}
+        value={bindingDraft.spaceId}
+        onChange={event => {
+          setBindingDraft(value => value === undefined ? value : { ...value, spaceId: event.target.value })
+        }}
+      >
+        {spaceSetup.spaces
+          .filter(space => !spaceSetup.bindings.some(binding => binding.spaceId === space.id))
+          .map(space => <option key={space.id} value={space.id}>{space.name}</option>)}
+      </select>
+      <select
+        aria-label={t('bindingAccess')}
+        value={bindingDraft.access}
+        onChange={event => {
+          const access = event.target.value as WorkspaceBindingDraftV1['access']
+          setBindingDraft(value => value === undefined ? value : {
+            ...value,
+            access,
+            defaultWrite: access === 'read-write' && value.defaultWrite,
+          })
+        }}
+      >
+        <option value="read">read</option>
+        <option value="read-write">read-write</option>
+      </select>
+      <label>
+        <input
+          type="checkbox"
+          aria-label={t('defaultWriteSpace')}
+          checked={bindingDraft.defaultWrite}
+          disabled={bindingDraft.access !== 'read-write'
+            || spaceSetup.bindings.some(binding => binding.defaultWrite)}
+          onChange={event => {
+            setBindingDraft(value => value === undefined ? value : { ...value, defaultWrite: event.target.checked })
+          }}
+        />{t('defaultWriteSpace')}
+      </label>
+      <button type="submit" disabled={busy}>{t('bindCurrentWorkspace')}</button>
+    </form>}
+    <button type="button" disabled={busy} onClick={() => {
+      setSpaceSetup(undefined)
+      setBindingDraft(undefined)
+    }}>{t('cancel')}</button>
+  </fieldset>
+
+  if (failed && snapshot === undefined) return <section className="dsh-mmem-settings">
+    <p role="alert">{t('loadError')}</p>
+    <button type="button" disabled={busy} onClick={openSpaceSetup}>{t('configureSpaces')}</button>
+    {spaceSetupPanel}
+  </section>
   if (snapshot === undefined) return <p role="status">{t('loading')}</p>
   return <section className="dsh-mmem-settings">
+    {failed ? <p role="alert">{t('loadError')}</p> : null}
     <h3>{t('activeSpace')}</h3>
     <p>{snapshot.activeSpace.spaceId} · {snapshot.activeSpace.access}</p>
     <button type="button" disabled={busy} onClick={openApprovalSettings}>
@@ -447,6 +597,9 @@ function SessionMemorySettingsTab({
     </button>
     <button type="button" disabled={busy} onClick={openSharingSettings}>
       {t('configureSharing')}
+    </button>
+    <button type="button" disabled={busy} onClick={openSpaceSetup}>
+      {t('configureSpaces')}
     </button>
     <form onSubmit={(event) => {
       event.preventDefault()
@@ -679,6 +832,7 @@ function SessionMemorySettingsTab({
         }}>{t('cancel')}</button>
       </form>
     </fieldset>}
+    {spaceSetupPanel}
     <fieldset>
       <legend>{t('records')}</legend>
       {snapshot.management.records.length === 0

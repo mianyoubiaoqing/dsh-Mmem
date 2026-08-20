@@ -104,8 +104,10 @@ import {
   type MemorySpaceRecallSnapshotV1,
 } from './space-archive-router.js'
 import {
+  createMemorySpaceSetup,
   openMemorySpaceCatalog,
   type MemorySpaceCatalogV1,
+  type MemorySpaceSetupV1,
 } from './space-catalog.js'
 import {
   createMemorySpaceSharingSettings,
@@ -230,6 +232,8 @@ declare module '@deepseek-ai/cordis' {
     mistymoonMemoryDerivedViews: DerivedMemoryViewRegistry
     /** Owner-governed Space Catalog; available only in Space mode. */
     dshMmemSpaceCatalog: MemorySpaceCatalogV1
+    /** Owner-bound setup for the exact DSH Workspace in a live Session. */
+    dshMmemSpaceSetup: MemorySpaceSetupV1
     /** DSH Session Workspace to physical Space Archive Router. */
     dshMmemSpaceRouter: MemorySpaceArchiveRouterV1
     /** Owner-governed direct Grant/Federation recall authority. */
@@ -2005,6 +2009,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   if (catalog !== undefined && router !== undefined) {
     const governanceContext = trustedGovernanceContext(principalResolver(ctx))
     ctx.effect(() => ctx.provide('dshMmemSpaceCatalog', catalog), 'dsh-mmem: Memory Space Catalog')
+    ctx.effect(
+      () => ctx.provide('dshMmemSpaceSetup', createMemorySpaceSetup(governanceContext.ownerId, catalog)),
+      'dsh-mmem: current DSH Workspace Space setup',
+    )
     if (sharing !== undefined) {
       ctx.effect(() => ctx.provide('dshMmemSpaceSharing', sharing), 'dsh-mmem: Space sharing policy')
       ctx.effect(

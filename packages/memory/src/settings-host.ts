@@ -18,6 +18,7 @@ import type {
   MemoryManagementRpcSnapshotV1,
   MemorySourceRpcSnapshotV1,
   MemorySpaceSharingSettingsRpcSnapshotV1,
+  MemorySpaceSetupRpcSnapshotV1,
 } from './settings-client.js'
 import type { MemorySpaceGovernanceSessionV1 } from './space-governance.js'
 import { MemoryRuntimeSettingsError, type MemoryApprovalPolicyUpdateV1 } from './runtime-settings.js'
@@ -26,6 +27,7 @@ import {
   type MemorySpaceSharingSettingsV1,
   type ReplaceMemorySpaceSharingPolicyRequestV1,
 } from './space-sharing.js'
+import type { MemorySpaceSetupV1 } from './space-catalog.js'
 
 export type {
   MemoryAssessmentRpcSnapshotV1,
@@ -38,6 +40,7 @@ export type {
   MemoryManagementRpcSnapshotV1,
   MemorySourceRpcSnapshotV1,
   MemorySpaceSharingSettingsRpcSnapshotV1,
+  MemorySpaceSetupRpcSnapshotV1,
 } from './settings-client.js'
 
 /** Cordis plugin name for the standalone Memory Settings Host. */
@@ -425,6 +428,33 @@ function memorySharingUpdate(value: unknown): MemorySharingUpdateInput | undefin
   }
 }
 
+function memorySpaceCreate(value: unknown): { sessionId: SessionId; name: string } | undefined {
+  if (!exactObject(value, ['sessionId', 'name'])
+    || typeof value.sessionId !== 'string' || value.sessionId.trim() === ''
+    || typeof value.name !== 'string' || value.name.trim() === '') return undefined
+  return { sessionId: SessionId(value.sessionId), name: value.name }
+}
+
+function memorySpaceBind(value: unknown): {
+  sessionId: SessionId
+  spaceId: string
+  access: 'read' | 'read-write'
+  defaultWrite: boolean
+} | undefined {
+  if (!exactObject(value, ['sessionId', 'spaceId', 'access', 'defaultWrite'])
+    || typeof value.sessionId !== 'string' || value.sessionId.trim() === ''
+    || typeof value.spaceId !== 'string' || value.spaceId.trim() === ''
+    || (value.access !== 'read' && value.access !== 'read-write')
+    || typeof value.defaultWrite !== 'boolean'
+    || (value.defaultWrite && value.access !== 'read-write')) return undefined
+  return {
+    sessionId: SessionId(value.sessionId),
+    spaceId: value.spaceId,
+    access: value.access,
+    defaultWrite: value.defaultWrite,
+  }
+}
+
 function activeSpaceReceipt(governance: MemorySpaceGovernanceSessionV1) {
   return {
     spaceId: governance.spaceId,
@@ -449,7 +479,10 @@ export function apply(ctx: Context): void {
         && endpoint !== 'settings/get'
         && endpoint !== 'settings/approval'
         && endpoint !== 'sharing/get'
-        && endpoint !== 'sharing/replace') {
+        && endpoint !== 'sharing/replace'
+        && endpoint !== 'spaces/get'
+        && endpoint !== 'spaces/create'
+        && endpoint !== 'spaces/bind') {
         return badRequest('Unknown dsh-Mmem Settings operation.')
       }
       const decision = endpoint === 'candidates/approve' || endpoint === 'candidates/reject'
@@ -464,14 +497,20 @@ export function apply(ctx: Context): void {
       const batch = endpoint === 'memory/batch' ? memoryBatch(payload) : undefined
       const approvalUpdate = endpoint === 'settings/approval' ? memoryApprovalUpdate(payload) : undefined
       const sharingUpdate = endpoint === 'sharing/replace' ? memorySharingUpdate(payload) : undefined
+      const spaceCreate = endpoint === 'spaces/create' ? memorySpaceCreate(payload) : undefined
+      const spaceBind = endpoint === 'spaces/bind' ? memorySpaceBind(payload) : undefined
       const selection = endpoint === 'candidates/list' || endpoint === 'settings/get' || endpoint === 'sharing/get'
+        || endpoint === 'spaces/get'
         ? sessionSelection(payload)
         : decision ?? search ?? source ?? assessment ?? revision ?? batch ?? approvalUpdate ?? sharingUpdate
+          ?? spaceCreate ?? spaceBind
       if (selection === undefined) {
         if (endpoint === 'candidates/list' || endpoint === 'settings/get' || endpoint === 'sharing/get') {
           return badRequest('Candidate listing requires one live DSH sessionId and an optional requestedSpaceId.')
         }
         if (endpoint === 'sharing/replace') return badRequest('Memory Space sharing policy update is invalid.')
+        if (endpoint === 'spaces/create') return badRequest('Memory Space creation request is invalid.')
+        if (endpoint === 'spaces/bind') return badRequest('DSH Workspace Binding request is invalid.')
         if (endpoint === 'settings/approval') return badRequest('Memory approval policy update is invalid.')
         if (endpoint === 'memory/search') return badRequest('Memory search filters are invalid.')
         if (endpoint === 'memory/source') return badRequest('Memory source selection is invalid.')
@@ -497,11 +536,33 @@ export function apply(ctx: Context): void {
         }
       }
       try {
+        if (endpoint === 'spaces/get' || spaceCreate !== undefined || spaceBind !== undefined) {
+          const setup = ctx.get('dshMmemSpaceSetup') as MemorySpaceSetupV1 | undefined
+          if (setup === undefined) return badRequest('Memory Space setup is unavailable.')
+          const state = spaceCreate !== undefined
+            ? await setup.createSpace(session.header, { name: spaceCreate.name })
+            : spaceBind !== undefined
+              ? await setup.bindCurrentDshWorkspace(session.header, {
+                  spaceId: spaceBind.spaceId,
+                  access: spaceBind.access,
+                  defaultWrite: spaceBind.defaultWrite,
+                })
+              : await setup.inspect(session.header)
+          const value: MemorySpaceSetupRpcSnapshotV1 = {
+            schemaVersion: 1,
+            spaces: state.spaces,
+            bindings: state.bindings,
+          }
+          return { ok: true, value }
+        }
+        const requestedSpaceId = 'requestedSpaceId' in selection
+          ? selection.requestedSpaceId
+          : undefined
         const governance = await ctx.dshMmemSpaceGovernance.resolve({
           sessionHeader: session.header,
-          ...(selection.requestedSpaceId === undefined
+          ...(requestedSpaceId === undefined
             ? {}
-            : { requestedSpaceId: selection.requestedSpaceId }),
+            : { requestedSpaceId }),
         })
         if (endpoint === 'sharing/get' || sharingUpdate !== undefined) {
           if (sharingUpdate !== undefined && governance.access !== 'read-write') {

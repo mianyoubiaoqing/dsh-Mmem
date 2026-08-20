@@ -19,7 +19,11 @@ import {
   type MemoryApprovalPolicyUpdateV1,
   type MemoryApprovalPolicyV1,
 } from './approval-policy.js'
-import type { MemorySpaceV1 } from './space-catalog.js'
+import type {
+  DshWorkspaceBindingAccessV1,
+  DshWorkspaceBindingV1,
+  MemorySpaceV1,
+} from './space-catalog.js'
 import type {
   InterSpaceModeV1,
   MemorySpaceSharingSnapshotV1,
@@ -129,6 +133,13 @@ export interface MemorySpaceSharingSettingsRpcSnapshotV1 {
   sharingPolicy: MemorySpaceSharingSnapshotV1
 }
 
+/** Owner Spaces and Bindings limited to the current live DSH Workspace. */
+export interface MemorySpaceSetupRpcSnapshotV1 {
+  schemaVersion: 1
+  spaces: readonly MemorySpaceV1[]
+  bindings: readonly DshWorkspaceBindingV1[]
+}
+
 /** Trusted browser state required to address one live DSH Session. */
 export interface MemorySettingsClientOptionsV1 {
   readonly rpc: MemorySettingsRpcCallerV1
@@ -183,6 +194,13 @@ export interface MemorySettingsClientV1 {
     update: Omit<ReplaceMemorySpaceSharingPolicyRequestV1, 'ownerId'>,
     signal?: AbortSignal,
   ): Promise<MemorySpaceSharingSettingsRpcSnapshotV1>
+  inspectSpaces(signal?: AbortSignal): Promise<MemorySpaceSetupRpcSnapshotV1>
+  createSpace(name: string, signal?: AbortSignal): Promise<MemorySpaceSetupRpcSnapshotV1>
+  bindCurrentDshWorkspace(input: {
+    spaceId: string
+    access: DshWorkspaceBindingAccessV1
+    defaultWrite: boolean
+  }, signal?: AbortSignal): Promise<MemorySpaceSetupRpcSnapshotV1>
 }
 
 /** Stable client-side failure for RPC and response-boundary errors. */
@@ -745,6 +763,64 @@ function sharingSettingsSnapshot(value: unknown): MemorySpaceSharingSettingsRpcS
   return value as MemorySpaceSharingSettingsRpcSnapshotV1
 }
 
+function spaceSetupSnapshot(value: unknown): MemorySpaceSetupRpcSnapshotV1 {
+  const input = exactObject(value, ['schemaVersion', 'spaces', 'bindings'], 'Memory Space setup snapshot')
+  if (input.schemaVersion !== 1
+    || !Array.isArray(input.spaces) || input.spaces.length > 1_000
+    || !Array.isArray(input.bindings) || input.bindings.length > 1_000) {
+    throw new MemorySettingsClientError('invalid-response', 'Memory Space setup snapshot has an invalid schema')
+  }
+  try {
+    const spaces = input.spaces.map(memorySpaceProjection)
+    const spaceById = new Map(spaces.map(space => [space.id, space]))
+    const bindings = input.bindings.map(item => {
+      const binding = exactObject(
+        item,
+        [
+          'schemaVersion',
+          'ownerId',
+          'dshWorkspaceCwd',
+          'spaceId',
+          'access',
+          'defaultWrite',
+          'revision',
+          'createdAt',
+        ],
+        'DSH Workspace Binding projection',
+      )
+      if (binding.schemaVersion !== 1
+        || typeof binding.ownerId !== 'string' || binding.ownerId.trim() === ''
+        || typeof binding.dshWorkspaceCwd !== 'string'
+        || !/^(?:[A-Za-z]:[\\/]|\/)/u.test(binding.dshWorkspaceCwd)
+        || typeof binding.spaceId !== 'string' || binding.spaceId.trim() === ''
+        || (binding.access !== 'read' && binding.access !== 'read-write')
+        || typeof binding.defaultWrite !== 'boolean'
+        || (binding.defaultWrite && binding.access !== 'read-write')
+        || typeof binding.revision !== 'string' || binding.revision.trim() === ''
+        || typeof binding.createdAt !== 'string') {
+        throw new TypeError('DSH Workspace Binding projection is invalid')
+      }
+      validateMemoryValidity({ recordedAt: binding.createdAt })
+      const space = spaceById.get(binding.spaceId)
+      if (space === undefined || space.ownerId !== binding.ownerId) {
+        throw new TypeError('DSH Workspace Binding references an unavailable Space')
+      }
+      return binding
+    })
+    if (new Set(spaces.map(space => space.id)).size !== spaces.length
+      || new Set(bindings.map(binding => binding.spaceId)).size !== bindings.length
+      || new Set(bindings.map(binding => binding.dshWorkspaceCwd)).size > 1
+      || bindings.filter(binding => binding.defaultWrite).length > 1) {
+      throw new TypeError('Memory Space setup relationships are ambiguous')
+    }
+  } catch (error) {
+    throw new MemorySettingsClientError('invalid-response', 'Memory Space setup snapshot contains invalid data', {
+      cause: error,
+    })
+  }
+  return value as MemorySpaceSetupRpcSnapshotV1
+}
+
 /** Create a Session-bound client that never accepts Owner or Workspace identity from the browser. */
 export function createMemorySettingsClient(options: MemorySettingsClientOptionsV1): MemorySettingsClientV1 {
   const selection = {
@@ -868,6 +944,29 @@ export function createMemorySettingsClient(options: MemorySettingsClientOptionsV
         mode: sharingMode(update.mode),
         grants: update.grants.map(sharingGrant),
         federations: update.federations.map(sharingFederation),
+      }, signal))
+    },
+    async inspectSpaces(signal) {
+      return spaceSetupSnapshot(await call('spaces/get', selection, signal))
+    },
+    async createSpace(name, signal) {
+      return spaceSetupSnapshot(await call('spaces/create', {
+        ...selection,
+        name: nonEmpty(name, 'Memory Space name'),
+      }, signal))
+    },
+    async bindCurrentDshWorkspace(input, signal) {
+      if (input.access !== 'read' && input.access !== 'read-write') {
+        throw new TypeError('DSH Workspace Binding access is unsupported')
+      }
+      if (input.defaultWrite && input.access !== 'read-write') {
+        throw new TypeError('default DSH Workspace Binding must be read-write')
+      }
+      return spaceSetupSnapshot(await call('spaces/bind', {
+        ...selection,
+        spaceId: nonEmpty(input.spaceId, 'Memory Space id'),
+        access: input.access,
+        defaultWrite: input.defaultWrite,
       }, signal))
     },
   }

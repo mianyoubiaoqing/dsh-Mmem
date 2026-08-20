@@ -91,6 +91,26 @@ export interface MemorySpaceCatalogV1 {
   inspect(request: { ownerId: string }): Promise<MemorySpaceCatalogSnapshotV1>
 }
 
+/** Owner-bound projection for creating Spaces and binding only the current DSH Workspace. */
+export interface MemorySpaceSetupSnapshotV1 {
+  schemaVersion: 1
+  spaces: readonly MemorySpaceV1[]
+  bindings: readonly DshWorkspaceBindingV1[]
+}
+
+/** Setup seam whose Owner is fixed by the trusted local Host Adapter. */
+export interface MemorySpaceSetupV1 {
+  inspect(sessionHeader: Pick<SessionHeader, 'cwd'>): Promise<MemorySpaceSetupSnapshotV1>
+  createSpace(
+    sessionHeader: Pick<SessionHeader, 'cwd'>,
+    request: Omit<CreateMemorySpaceRequestV1, 'ownerId'>,
+  ): Promise<MemorySpaceSetupSnapshotV1>
+  bindCurrentDshWorkspace(
+    sessionHeader: Pick<SessionHeader, 'cwd'>,
+    request: Omit<BindDshWorkspaceRequestV1, 'ownerId' | 'sessionHeader'>,
+  ): Promise<MemorySpaceSetupSnapshotV1>
+}
+
 /** Construction inputs for the versioned Memory Space Catalog. */
 export interface OpenMemorySpaceCatalogOptions {
   path: string
@@ -148,6 +168,12 @@ function memorySpaceId(value: unknown): string {
   return id
 }
 
+function memorySpaceName(value: unknown): string {
+  const name = nonEmptyString(value, 'space name').trim()
+  if (name.length > 128) throw new Error('Memory Space name must not exceed 128 characters')
+  return name
+}
+
 function isoTimestamp(value: unknown): string {
   const timestamp = nonEmptyString(value, 'createdAt')
   const parsed = new Date(timestamp)
@@ -167,7 +193,7 @@ export function parseMemorySpaceV1(value: unknown): MemorySpaceV1 {
     schemaVersion: 1,
     id: memorySpaceId(value.id),
     ownerId: nonEmptyString(value.ownerId, 'space ownerId'),
-    name: nonEmptyString(value.name, 'space name'),
+    name: memorySpaceName(value.name),
     createdAt: isoTimestamp(value.createdAt),
   }
 }
@@ -310,11 +336,15 @@ class FileMemorySpaceCatalog implements MemorySpaceCatalogV1 {
 
   async createSpace(request: CreateMemorySpaceRequestV1): Promise<MemorySpaceV1> {
     return this.#mutate(document => {
+      const ownerId = nonEmptyString(request.ownerId, 'space ownerId')
+      const name = memorySpaceName(request.name)
+      const existing = document.spaces.find(space => space.ownerId === ownerId && space.name === name)
+      if (existing !== undefined) return { document, result: { ...existing } }
       const space: MemorySpaceV1 = {
         schemaVersion: 1,
         id: memorySpaceId(this.createId()),
-        ownerId: nonEmptyString(request.ownerId, 'space ownerId'),
-        name: nonEmptyString(request.name, 'space name'),
+        ownerId,
+        name,
         createdAt: isoTimestamp(this.now().toISOString()),
       }
       if (document.spaces.some(existing => existing.id === space.id)) {
@@ -351,9 +381,13 @@ class FileMemorySpaceCatalog implements MemorySpaceCatalogV1 {
       if (!document.spaces.some(space => space.id === spaceId && space.ownerId === ownerId)) {
         throw new Error('Memory Space is unavailable for Owner')
       }
-      if (document.bindings.some(binding => binding.ownerId === ownerId
-        && binding.dshWorkspaceCwd === cwd && binding.spaceId === spaceId)) {
-        throw new Error('DSH Workspace Binding already exists')
+      const existing = document.bindings.find(binding => binding.ownerId === ownerId
+        && binding.dshWorkspaceCwd === cwd && binding.spaceId === spaceId)
+      if (existing !== undefined) {
+        if (existing.access === request.access && existing.defaultWrite === request.defaultWrite) {
+          return { document, result: { ...existing } }
+        }
+        throw new Error('DSH Workspace Binding already exists with different access')
       }
       if (request.defaultWrite && document.bindings.some(binding => binding.ownerId === ownerId
         && binding.dshWorkspaceCwd === cwd && binding.defaultWrite)) {
@@ -453,4 +487,50 @@ export async function openMemorySpaceCatalog(
     options.leaseTimeoutMs ?? 30_000,
     options.leaseStaleMs ?? 120_000,
   )
+}
+
+/** Bind Space setup to one trusted Owner and exact cwd evidence from each live Session. */
+export function createMemorySpaceSetup(
+  ownerId: string,
+  catalog: MemorySpaceCatalogV1,
+): MemorySpaceSetupV1 {
+  const trustedOwnerId = nonEmptyString(ownerId, 'Memory Space setup Owner')
+  const inspect = async (
+    sessionHeader: Pick<SessionHeader, 'cwd'>,
+  ): Promise<MemorySpaceSetupSnapshotV1> => {
+    const cwd = dshWorkspaceCwd(sessionHeader.cwd)
+    if (cwd === undefined) {
+      throw new MemorySpaceCatalogError(
+        'DSH Workspace is unavailable from SessionHeader.cwd',
+        'DSH_WORKSPACE_UNAVAILABLE',
+      )
+    }
+    const [spaceSnapshot, bindingSnapshot] = await Promise.all([
+      catalog.inspect({ ownerId: trustedOwnerId }),
+      catalog.listBindings({ ownerId: trustedOwnerId }),
+    ])
+    return {
+      schemaVersion: 1,
+      spaces: spaceSnapshot.spaces,
+      bindings: bindingSnapshot.bindings.filter(binding => binding.dshWorkspaceCwd === cwd),
+    }
+  }
+  return {
+    inspect,
+    async createSpace(sessionHeader, request) {
+      await inspect(sessionHeader)
+      await catalog.createSpace({ ownerId: trustedOwnerId, name: request.name })
+      return inspect(sessionHeader)
+    },
+    async bindCurrentDshWorkspace(sessionHeader, request) {
+      await catalog.bindDshWorkspace({
+        ownerId: trustedOwnerId,
+        sessionHeader,
+        spaceId: request.spaceId,
+        access: request.access,
+        defaultWrite: request.defaultWrite,
+      })
+      return inspect(sessionHeader)
+    },
+  }
 }
