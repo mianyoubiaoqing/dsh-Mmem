@@ -11,6 +11,7 @@
         spacesRoot: !!js dshHomePath('dsh-mmem', 'spaces')
         recallLimit: 8
         settingsPath: !!js dshHomePath('dsh-mmem', 'settings', 'settings.json')
+        approvalPollIntervalMs: 60000
         leaseTimeoutMs: 30000
         leaseStaleMs: 120000
         disposeTimeoutMs: 5000

@@ -25,6 +25,9 @@ if (typeof memory.openMemorySpaceCatalog !== 'function') {
 if (typeof memory.openMemorySpaceArchiveRouter !== 'function') {
   throw new Error('built memory plugin is missing openMemorySpaceArchiveRouter')
 }
+if (typeof memory.createMemoryApprovalSchedulerV1 !== 'function') {
+  throw new Error('built memory plugin is missing createMemoryApprovalSchedulerV1')
+}
 if (settingsHost.name !== 'dsh-mmem-settings-host') {
   throw new Error(`unexpected Memory Settings Host plugin name: ${String(settingsHost.name)}`)
 }
