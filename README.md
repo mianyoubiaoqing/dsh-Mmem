@@ -2,7 +2,7 @@
 
 `dsh-Mmem` 是一个正在从 MistyMoon 套件拆出的独立 DeepSeek Harness 长期记忆插件工作仓库。目标是提供 Owner 隔离、来源可追溯、可人工审批或按用户时区定时自动审核的治理型记忆，并支持绑定 DSH Workspace、可选择性共享的独立 Memory Spaces，而不是把 Memory 绑定到 RP Persona 或另建 Agent Runtime。
 
-> 当前状态：独立插件 alpha，尚未公开发布，也尚未完成跨 Space 共享与 clean Profile 发行验收。当前 Settings tab 已提供 Session-bound 人工审批与策略配置；Owner 显式启用 `scheduled-auto` 后，本机调度器通过 fresh、无工具的 rc.8 Agent Session 生成建议，并在治理重校验后处理低风险候选。旧 SQLite 迁移已提供显式 plan/apply/rollback，但在正式发行验收前仍不要直接迁移真实档案。
+> 当前状态：独立插件 alpha，尚未公开发布，也尚未完成跨 Space 召回路由与 clean Profile 发行验收。当前 Settings tab 已提供 Session-bound 人工审批与策略配置；Owner 显式启用 `scheduled-auto` 后，本机调度器通过 fresh、无工具的 rc.8 Agent Session 生成建议，并在治理重校验后处理低风险候选。旧 SQLite 迁移已提供显式 plan/apply/rollback，但在正式发行验收前仍不要直接迁移真实档案。
 
 ## 当前包含
 
@@ -25,6 +25,7 @@
 - 第十二阶段治理型自动审核 runner：只接受带 DSH Session receipt 的结构化建议；在提交前重读 exact policy revision、trusted Owner、DSH Workspace Binding revision、Space、Candidate 完整快照、来源与 deterministic conflict。低置信度、失败、`boundary`、`commitment` 和阻塞冲突均 defer。当前尚未提供实际创建 rc.8 Agent Session 的 Evaluator Adapter。
 - 第十三阶段 rc.8 DSH Session Evaluator：每个候选使用 fresh、无 seed/parent 的 Agent Session；complete system prompt、runtime-context suppression、空工具 catalog 与执行 guard 共同封闭能力面。候选和严格 JSON 输出进入 DSH 日志，只有 `ctx.sessions.flush()` 确认存在 durability listener 后才返回 exact event receipt。Provider/model 可留空以沿用 DSH 默认路由，也可在插件配置中固定。
 - 第十四阶段独立迁移事务：旧 MistyMoon SQLite confirmed rows 先形成 content-free logical digest plan；apply 要求 exact Owner confirmation、source/target digest，并在目标 Archive lease 内备份原 generation、导入临时 generation 后原子发布。结果携带 rollback token；rehearsal 与实际 rollback 都拒绝目标或备份漂移。
+- 第十五阶段 Space sharing catalog：单独的版本化目录以 exact revision 保存 Owner 的 `isolated`、`selective` 或 `federated` 模式。Selective Grant 是带 Memory Kind/visibility 过滤的单向、只读、非传递授权；Federation 只包含显式成员，且一个 Space 最多属于一个 Federation。解析器只返回 Active Space 的直接授权 Source Space 与 policy receipt，不改变 DSH Workspace Binding 或记忆归属。
 - npm 发布边界：内部 workspace 包继续私有；唯一安装包 `@mistymoon/dsh-mmem` 聚合 Memory、本地 principal Adapter、Settings Host 和 Settings UI，并声明官方 DSH bundle patch。
 
 ## 目录
@@ -81,7 +82,7 @@ pnpm migrate:standalone -- rollback <rollback-token> <rollback-confirmation>
 ## 下一步
 
 1. 用统一 `GovernedMemoryV1` Interface 深化 Archive/governance/recall Module。
-2. 在已完成的 Catalog、物理隔离、Runtime 路由和 Space-aware Settings governance 上，分阶段实现非传递的有限共享和显式 Federation。
+2. 把已完成的 Space sharing catalog 接入 Archive Router，执行带授权 receipt、全局结果/字符预算的 Borrowed Recall；随后接入 Session-bound Settings UI。
 3. 完成 clean DSH Profile UI smoke、许可证复核与发行验收后，再由 Owner 手动上传 npm tarball。
 
 ## 许可证
