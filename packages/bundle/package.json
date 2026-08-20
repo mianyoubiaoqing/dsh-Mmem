@@ -75,6 +75,10 @@
       "types": "./lib/memory/principal-local.d.ts",
       "default": "./lib/memory/principal-local.js"
     },
+    "./approval-policy": {
+      "types": "./lib/memory/approval-policy.d.ts",
+      "default": "./lib/memory/approval-policy.js"
+    },
     "./settings-ui": {
       "types": "./lib/settings-ui/index.d.ts",
       "default": "./lib/settings-ui/index.js"

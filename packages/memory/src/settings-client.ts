@@ -14,6 +14,11 @@ import type {
 } from './contracts.js'
 import type { MemoryConflictAssessmentV1 } from './conflict.js'
 import { parseMemoryKind, parseMemoryScopeV1, validateMemoryValidity, type MemoryKind } from './domain.js'
+import {
+  parseMemoryApprovalPolicyV1,
+  type MemoryApprovalPolicyUpdateV1,
+  type MemoryApprovalPolicyV1,
+} from './approval-policy.js'
 
 const SETTINGS_CHANNEL = '/dsh-mmem-settings'
 
@@ -101,6 +106,13 @@ export interface MemoryBatchRpcSnapshotV1 {
   batch: MemoryBatchGovernanceResultV1
 }
 
+/** Owner approval policy bound to the Active Space receipt used to authenticate Settings access. */
+export interface MemoryApprovalSettingsRpcSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  approvalPolicy: MemoryApprovalPolicyV1
+}
+
 /** Trusted browser state required to address one live DSH Session. */
 export interface MemorySettingsClientOptionsV1 {
   readonly rpc: MemorySettingsRpcCallerV1
@@ -145,6 +157,11 @@ export interface MemorySettingsClientV1 {
     decisions: readonly MemoryBatchDecisionV1[],
     signal?: AbortSignal,
   ): Promise<MemoryBatchRpcSnapshotV1>
+  getApprovalPolicy(signal?: AbortSignal): Promise<MemoryApprovalSettingsRpcSnapshotV1>
+  updateApprovalPolicy(
+    update: MemoryApprovalPolicyUpdateV1,
+    signal?: AbortSignal,
+  ): Promise<MemoryApprovalSettingsRpcSnapshotV1>
 }
 
 /** Stable client-side failure for RPC and response-boundary errors. */
@@ -553,6 +570,24 @@ function batchSnapshot(value: unknown): MemoryBatchRpcSnapshotV1 {
   return value as MemoryBatchRpcSnapshotV1
 }
 
+function approvalSettingsSnapshot(value: unknown): MemoryApprovalSettingsRpcSnapshotV1 {
+  const input = exactObject(
+    value,
+    ['schemaVersion', 'activeSpace', 'approvalPolicy'],
+    'Memory approval settings snapshot',
+  )
+  if (input.schemaVersion !== 1) {
+    throw new MemorySettingsClientError('invalid-response', 'Memory approval settings have an invalid version')
+  }
+  activeSpaceReceipt(input.activeSpace)
+  try {
+    parseMemoryApprovalPolicyV1(input.approvalPolicy)
+  } catch (error) {
+    throw new MemorySettingsClientError('invalid-response', 'Memory approval policy is invalid', { cause: error })
+  }
+  return value as MemoryApprovalSettingsRpcSnapshotV1
+}
+
 /** Create a Session-bound client that never accepts Owner or Workspace identity from the browser. */
 export function createMemorySettingsClient(options: MemorySettingsClientOptionsV1): MemorySettingsClientV1 {
   const selection = {
@@ -651,6 +686,19 @@ export function createMemorySettingsClient(options: MemorySettingsClientOptionsV
         ...selection,
         requestId: nonEmpty(createRequestId(), 'requestId'),
         decisions: payloadDecisions,
+      }, signal))
+    },
+    async getApprovalPolicy(signal) {
+      return approvalSettingsSnapshot(await call('settings/get', selection, signal))
+    },
+    async updateApprovalPolicy(update, signal) {
+      return approvalSettingsSnapshot(await call('settings/approval', {
+        ...selection,
+        expectedRevision: update.expectedRevision,
+        mode: update.mode,
+        ...(update.mode === 'scheduled-auto'
+          ? { timeZone: update.timeZone, localTime: update.localTime }
+          : {}),
       }, signal))
     },
   }

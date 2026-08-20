@@ -78,6 +78,10 @@
     "./principal-local": {
       "types": "./lib/principal-local.d.ts",
       "default": "./lib/principal-local.js"
+    },
+    "./approval-policy": {
+      "types": "./lib/approval-policy.d.ts",
+      "default": "./lib/approval-policy.js"
     }
   },
   "scripts": {

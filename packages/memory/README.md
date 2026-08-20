@@ -36,6 +36,8 @@ The loopback Settings RPC client exposes the operations used by the dedicated Me
 
 Private runtime settings now carry a versioned approval policy. Missing or legacy policy fields resolve to revision-zero `manual`; `scheduled-auto` can be persisted only with an explicit IANA time zone, 24-hour local time, and the exact previously observed revision. Updates take a cross-process lease, so concurrent writers cannot both commit from the same revision. Policy persistence alone never starts an approval run; the local scheduler remains a follow-up Module.
 
+The Memory-owned runtime-settings Manager is exposed to the loopback Settings Host only after a live DSH Session resolves an Active Space. The browser client can read the current policy and submit only its expected revision, mode, time zone, and local time; Owner identity, Workspace evidence, settings paths, and policy revisions chosen by the browser never enter the trusted context. The policy editor itself is a follow-up UI slice.
+
 Current limitations:
 
 - The current `local-dsh-host-rpc` authority supports only the default loopback Web single-Owner deployment. Other channels remain fail-closed until they supply an authenticated authority adapter.

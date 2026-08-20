@@ -47,6 +47,7 @@ describe('dsh-Mmem Settings Host RPC', () => {
     await ctx.plugin(MemoryPlugin, {
       spaceCatalogPath: join(root, 'catalog.json'),
       spacesRoot: join(root, 'spaces'),
+      settingsPath: join(root, 'settings', 'settings.json'),
     })
     await ctx.plugin(MemorySettingsHost)
     const cwd = 'D:\\workspaces\\project-alpha'
@@ -80,6 +81,36 @@ describe('dsh-Mmem Settings Host RPC', () => {
       options: { authority: 'loopback' },
     })
     if (registration === undefined) throw new Error('expected the Settings RPC registration')
+    await expect(registration.handler('settings/get', {
+      sessionId: String(session.id),
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: { spaceId: space.id, bindingRevision: binding.revision },
+        approvalPolicy: { schemaVersion: 1, revision: 0, mode: 'manual' },
+      },
+    })
+    await expect(registration.handler('settings/approval', {
+      sessionId: String(session.id),
+      expectedRevision: 0,
+      mode: 'scheduled-auto',
+      timeZone: 'Asia/Shanghai',
+      localTime: '03:30',
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: { spaceId: space.id, bindingRevision: binding.revision },
+        approvalPolicy: {
+          schemaVersion: 1,
+          revision: 1,
+          mode: 'scheduled-auto',
+          timeZone: 'Asia/Shanghai',
+          localTime: '03:30',
+        },
+      },
+    })
     await expect(registration.handler('candidates/list', {
       sessionId: String(session.id),
       ownerId: 'browser-must-not-select-owner',

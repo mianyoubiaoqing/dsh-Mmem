@@ -18,6 +18,7 @@
 - 第五阶段 Browser RPC client：独立 `@mistymoon/dsh-memory/settings-client` 固定连接 Memory-owned channel，只从 DSH UI 接受 live `sessionId` 与可选已绑定 Space；它校验所有 Host 响应，并为审批、编辑、合并和批量操作生成幂等 request ID。
 - 第六阶段 Settings 管理 UI：从 DSH 公共 Session list 读取当前 live Session，展示 exact Active Space、正式记忆、候选及 payload-free 来源/lineage，提供受治理的搜索/筛选、append-only Candidate 编辑/合并、人工批准/拒绝和逐项 partial-success 批量治理；冲突候选必须由 Owner 明确选择 keep-both 或 supersede。无 Session 与只读 Binding 均失败关闭。
 - 第七阶段审批策略核心：私有 runtime settings 默认 `manual`；Owner 可用 exact revision 显式切换到带 IANA 时区与 `HH:mm` 本地时间的 `scheduled-auto`，并发陈旧更新失败关闭。此阶段尚未启动调度器或自动审批。
+- 第八阶段策略 RPC：Memory-owned settings Manager 与 loopback Settings Host 通过 live Session/Active Space receipt 暴露策略读取和 exact-revision 更新；browser client 不能提交 Owner、Workspace 或 settings path。策略 UI 和调度副作用仍未启用。
 - npm 发布边界：内部 workspace 包继续私有；唯一安装包 `@mistymoon/dsh-mmem` 聚合 Memory、本地 principal Adapter、Settings Host 和 Settings UI，并声明官方 DSH bundle patch。
 
 ## 目录

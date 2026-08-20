@@ -43,7 +43,11 @@ import type {
   MemorySourceViewV1,
   MemoryVisibility,
 } from './contracts.js'
-import { DEFAULT_RECALL_LIMIT, loadMemoryRuntimeSettings } from './runtime-settings.js'
+import {
+  createMemoryRuntimeSettingsManager,
+  DEFAULT_RECALL_LIMIT,
+  loadMemoryRuntimeSettings,
+} from './runtime-settings.js'
 import {
   CandidateExtractionRegistry,
   extractMemoryCandidates,
@@ -109,6 +113,7 @@ export * from './space-catalog.js'
 export * from './space-archive-router.js'
 export * from './space-governance.js'
 export * from './principal.js'
+export * from './approval-policy.js'
 
 /** Cordis plugin name and durable user-message source id. */
 export const name = 'mistymoon-memory'
@@ -1844,6 +1849,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         spacesRoot: config.spacesRoot,
       })
   const extraction = new CandidateExtractionRegistry()
+  const runtimeSettings = createMemoryRuntimeSettingsManager({
+    fallbackRecallLimit: recallLimit,
+    ...(config.settingsPath === undefined ? {} : { path: config.settingsPath }),
+  })
+  ctx.effect(
+    () => ctx.provide('dshMmemRuntimeSettings', runtimeSettings),
+    'dsh-mmem: private runtime settings Manager',
+  )
   if (archive !== undefined) {
     ctx.effect(() => ctx.provide('mistymoonMemory', archive), 'mistymoon-memory: shared archive')
   }
