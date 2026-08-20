@@ -40,6 +40,7 @@ describe('MistyMoon memory plugin', () => {
     await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, {
       spaceCatalogPath: join(root, 'catalog.json'),
+      spaceSharingPath: join(root, 'sharing.json'),
       spacesRoot: join(root, 'spaces'),
       recallLimit: 4,
     })
@@ -54,6 +55,42 @@ describe('MistyMoon memory plugin', () => {
       spaceId: space.id,
       access: 'read-write',
       defaultWrite: true,
+    })
+    const sharedSpace = await ctx.dshMmemSpaceCatalog.createSpace({
+      ownerId: 'owner-fixture',
+      name: 'Shared Standards',
+    })
+    await ctx.dshMmemSpaceCatalog.bindDshWorkspace({
+      ownerId: 'owner-fixture',
+      sessionHeader: { cwd },
+      spaceId: sharedSpace.id,
+      access: 'read-write',
+      defaultWrite: false,
+    })
+    await ctx.dshMmemSpaceSharing.replacePolicy({
+      ownerId: 'owner-fixture',
+      expectedRevision: '0',
+      mode: 'selective',
+      grants: [{
+        id: 'grant-standards-to-project',
+        sourceSpaceId: sharedSpace.id,
+        targetSpaceId: space.id,
+        memoryKinds: ['summary'],
+        visibilities: ['personal'],
+      }],
+      federations: [],
+    })
+    const shared = await ctx.dshMmemSpaceRouter.resolveSession({
+      ownerId: 'owner-fixture',
+      sessionHeader: { cwd },
+      requestedSpaceId: sharedSpace.id,
+    })
+    if (shared.kind !== 'active') throw new Error('expected shared Source Space')
+    await shared.observeExplicit({
+      context: PERSONAL_COMPANION_ACCESS,
+      sourceMessageId: 'message-shared-standard',
+      text: '请记住：Project Alpha 使用蓝绿部署准则。',
+      memoryKind: 'summary',
     })
     const id = SessionId('space-routed-memory-session')
     const session = Session.create(id, [], { version: 0, id, createdAt: 1, cwd })
@@ -74,6 +111,10 @@ describe('MistyMoon memory plugin', () => {
     expect(projection?.content).toEqual([{
       type: 'text',
       text: expect.stringContaining(`space:${space.id}; binding:`),
+    }])
+    expect(projection?.content).toEqual([{
+      type: 'text',
+      text: expect.stringContaining('sharing:space-share-grant:grant-standards-to-project@'),
     }])
   })
 

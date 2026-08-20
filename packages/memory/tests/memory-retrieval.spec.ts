@@ -71,4 +71,15 @@ describe('governed BM25 retrieval', () => {
     })
     expect(snapshot.items).toEqual([])
   })
+
+  it('validates trusted-host retrieval filters even when the Archive is empty', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mistymoon-retrieval-filter-validation-'))
+    const archive = await openMemoryArchive({ path: join(root, 'memory.jsonl') })
+
+    await expect(archive.retrieve({
+      context: PERSONAL_COMPANION_ACCESS,
+      query: 'fixture',
+      memoryKinds: ['not-a-memory-kind' as 'summary'],
+    })).rejects.toThrow('memory kind is unsupported')
+  })
 })

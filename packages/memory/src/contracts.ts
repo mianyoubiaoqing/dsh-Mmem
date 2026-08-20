@@ -240,6 +240,10 @@ export interface MemoryRecall extends TrustedMemoryRequest {
 
 export interface MemoryRetrievalRequestV1 extends MemoryRecall {
   maxCharacters?: number
+  /** Optional trusted host filter applied before ranking, used by direct Space Share Grants. */
+  memoryKinds?: readonly MemoryKind[]
+  /** Optional trusted host filter applied after ordinary disclosure gates and before ranking. */
+  visibilities?: readonly MemoryVisibility[]
 }
 
 /** Side-effect-free lifecycle proposal input under a host-constructed governance context. */

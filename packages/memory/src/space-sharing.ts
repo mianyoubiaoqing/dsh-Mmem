@@ -211,6 +211,13 @@ function parseSnapshot(value: unknown): MemorySpaceSharingSnapshotV1 {
     || new Set(federations.map(federation => federation.id)).size !== federations.length) {
     throw new Error('duplicate Memory Space sharing relation id')
   }
+  const grantPairs = grants.map(grant => `${JSON.stringify(grant.sourceSpaceId)}:${JSON.stringify(grant.targetSpaceId)}`)
+  if (new Set(grantPairs).size !== grantPairs.length) {
+    throw new MemorySpaceSharingError(
+      'only one Space Share Grant may exist for each Source and Target pair',
+      'MEMORY_SPACE_SHARE_GRANT_INVALID',
+    )
+  }
   const federationMembers = federations.flatMap(federation => federation.spaceIds)
   if (new Set(federationMembers).size !== federationMembers.length) {
     throw new MemorySpaceSharingError('one Space may belong to at most one Federation', 'MEMORY_SPACE_FEDERATION_INVALID')

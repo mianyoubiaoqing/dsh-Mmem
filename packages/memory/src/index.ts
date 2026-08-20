@@ -80,6 +80,7 @@ import {
   memoryScopeEquals,
   memorySourceKey,
   parseMemoryAccessContextV1,
+  parseMemoryKind,
   validateMemoryValidity,
   type MemoryAccessContextV1,
   type MemoryKind,
@@ -106,6 +107,10 @@ import {
   openMemorySpaceCatalog,
   type MemorySpaceCatalogV1,
 } from './space-catalog.js'
+import {
+  openMemorySpaceSharingCatalog,
+  type MemorySpaceSharingCatalogV1,
+} from './space-sharing.js'
 import {
   createMemoryGovernanceService,
   createMemorySpaceGovernanceResolver,
@@ -146,6 +151,8 @@ export interface Config {
   spaceCatalogPath?: string
   /** Private root containing one physical Archive directory per Memory Space. */
   spacesRoot?: string
+  /** Optional versioned cross-Space recall policy; omitted keeps every Space isolated. */
+  spaceSharingPath?: string
   /** Maximum memories included in one model-visible snapshot. */
   recallLimit?: number
   /** Optional private owner settings document read before each recall. */
@@ -187,6 +194,7 @@ export const Config: z<Config> = z.object({
   path: z.string(),
   spaceCatalogPath: z.string(),
   spacesRoot: z.string(),
+  spaceSharingPath: z.string(),
   recallLimit: z.number().step(1).min(1).max(20).default(DEFAULT_RECALL_LIMIT),
   settingsPath: z.string(),
   approvalSchedulerPath: z.string(),
@@ -222,6 +230,8 @@ declare module '@deepseek-ai/cordis' {
     dshMmemSpaceCatalog: MemorySpaceCatalogV1
     /** DSH Session Workspace to physical Space Archive Router. */
     dshMmemSpaceRouter: MemorySpaceArchiveRouterV1
+    /** Owner-governed direct Grant/Federation recall authority. */
+    dshMmemSpaceSharing: MemorySpaceSharingCatalogV1
     /** Loopback-only Settings governance resolved from a DSH Session Workspace. */
     dshMmemSpaceGovernance: MemorySpaceGovernanceResolverV1
   }
@@ -471,7 +481,22 @@ class StorageBackedMemoryArchive implements CompanionMemoryArchive {
     const state = this.storage.snapshot()
     const createdAt = this.now().toISOString()
     if (state === undefined) return { schemaVersion: 1, query: input.query, createdAt, items: [] }
+    const memoryKinds = input.memoryKinds?.map(parseMemoryKind)
+    if (memoryKinds !== undefined && new Set(memoryKinds).size !== memoryKinds.length) {
+      throw new TypeError('retrieval memoryKinds must be unique')
+    }
+    const visibilities = input.visibilities?.map(visibility => {
+      if (visibility !== 'personal' && visibility !== 'confidential') {
+        throw new TypeError('retrieval visibility is unsupported')
+      }
+      return visibility
+    })
+    if (visibilities !== undefined && new Set(visibilities).size !== visibilities.length) {
+      throw new TypeError('retrieval visibilities must be unique')
+    }
     const eligible = this.#eligibleRecords(state, context, input.at ?? createdAt)
+      .filter(memory => memoryKinds === undefined || memoryKinds.includes(memory.memoryKind))
+      .filter(memory => visibilities === undefined || visibilities.includes(memory.visibility))
     return this.retrievalEngine.retrieve(eligible, input, createdAt)
   }
 
@@ -1283,11 +1308,12 @@ export async function openMemorySpaceArchiveRouter(
 ): Promise<MemorySpaceArchiveRouterV1> {
   const {
     catalog,
+    sharing,
     spacesRoot,
     ...archiveOptions
   } = options
   return createMemorySpaceArchiveRouter(
-    { catalog, spacesRoot },
+    { catalog, sharing, spacesRoot },
     path => openMemoryArchive({ ...archiveOptions, path }),
   )
 }
@@ -1304,6 +1330,10 @@ function recallSnapshot(snapshot: MemoryRecallSnapshotV1 | MemorySpaceRecallSnap
       const receipt = reasons.map(reason => `${reason.providerId}:${reason.reason}`).join(',')
       const spaceReceipt = 'sourceSpaceId' in item && 'activeSpace' in snapshot
         ? `; space:${item.sourceSpaceId}; binding:${snapshot.activeSpace.bindingRevision}`
+          + (item.authorization === undefined
+            ? ''
+            : `; sharing:${item.authorization.kind}:${item.authorization.relationId}`
+              + `@${item.authorization.policyRevision}`)
         : ''
       return `- [memory:${memory.id}${spaceReceipt}; source:${memory.sourceMessageId}; reason:${receipt}] ${memory.content}`
     }).join('\n')
@@ -1856,7 +1886,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     throw new TypeError('mistymoon-memory: maxTransactionBytes must not exceed maxArchiveBytes')
   }
   const legacyMode = config.path !== undefined
-  const spaceMode = config.spaceCatalogPath !== undefined || config.spacesRoot !== undefined
+  const spaceMode = config.spaceCatalogPath !== undefined
+    || config.spacesRoot !== undefined
+    || config.spaceSharingPath !== undefined
   if (legacyMode === spaceMode
     || (spaceMode && (config.spaceCatalogPath === undefined || config.spacesRoot === undefined))) {
     throw new TypeError('mistymoon-memory: configure either path or both spaceCatalogPath and spacesRoot')
@@ -1882,11 +1914,20 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         leaseTimeoutMs: config.leaseTimeoutMs ?? 30_000,
         leaseStaleMs: config.leaseStaleMs ?? 120_000,
       })
+  const sharing = config.spaceSharingPath === undefined || catalog === undefined
+    ? undefined
+    : await openMemorySpaceSharingCatalog({
+        path: config.spaceSharingPath,
+        spaces: catalog,
+        leaseTimeoutMs: config.leaseTimeoutMs ?? 30_000,
+        leaseStaleMs: config.leaseStaleMs ?? 120_000,
+      })
   const router = catalog === undefined || config.spacesRoot === undefined
     ? undefined
     : await openMemorySpaceArchiveRouter({
         ...archiveOptions,
         catalog,
+        ...(sharing === undefined ? {} : { sharing }),
         spacesRoot: config.spacesRoot,
       })
   const extraction = new CandidateExtractionRegistry()
@@ -1959,6 +2000,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
   if (catalog !== undefined && router !== undefined) {
     ctx.effect(() => ctx.provide('dshMmemSpaceCatalog', catalog), 'dsh-mmem: Memory Space Catalog')
+    if (sharing !== undefined) {
+      ctx.effect(() => ctx.provide('dshMmemSpaceSharing', sharing), 'dsh-mmem: Space sharing policy')
+    }
     ctx.effect(() => ctx.provide('dshMmemSpaceRouter', router), 'dsh-mmem: Space Archive Router')
     const governanceContext = trustedGovernanceContext(principalResolver(ctx))
     ctx.effect(
