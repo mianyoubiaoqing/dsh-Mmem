@@ -14,6 +14,8 @@
         approvalPollIntervalMs: 60000
         approvalMaxCandidates: 100
         approvalMinimumConfidence: 0.9
+        approvalReviewEnabled: true
+        approvalReviewMaxTokens: 512
         leaseTimeoutMs: 30000
         leaseStaleMs: 120000
         disposeTimeoutMs: 5000

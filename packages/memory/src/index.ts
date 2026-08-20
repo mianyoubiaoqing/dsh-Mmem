@@ -57,6 +57,10 @@ import {
   createGovernedMemoryScheduledApprovalRunnerV1,
 } from './approval-review.js'
 import {
+  createDshAgentApprovalReviewSessionDriverV1,
+  createDshMemoryApprovalReviewEvaluatorV1,
+} from './approval-review-dsh.js'
+import {
   CandidateExtractionRegistry,
   extractMemoryCandidates,
   type CandidateExtractionRequestV1,
@@ -125,6 +129,7 @@ export * from './approval-policy.js'
 export * from './approval-schedule.js'
 export * from './approval-scheduler.js'
 export * from './approval-review.js'
+export * from './approval-review-dsh.js'
 
 /** Cordis plugin name and durable user-message source id. */
 export const name = 'mistymoon-memory'
@@ -152,6 +157,14 @@ export interface Config {
   approvalMaxCandidates?: number
   /** Minimum evaluator confidence required before any automatic decision. */
   approvalMinimumConfidence?: number
+  /** Whether scheduled-auto may use isolated DSH Agent Sessions for review. */
+  approvalReviewEnabled?: boolean
+  /** Optional DSH provider route for review Sessions; omitted uses the deployment default. */
+  approvalReviewProvider?: string
+  /** Optional DSH model for review Sessions; omitted uses the deployment default. */
+  approvalReviewModel?: string
+  /** Maximum output tokens for one Candidate review response. */
+  approvalReviewMaxTokens?: number
   /** Maximum time to wait for the cross-process archive lease. */
   leaseTimeoutMs?: number
   /** Age after which an unrefreshed archive lease may be reclaimed. */
@@ -179,6 +192,10 @@ export const Config: z<Config> = z.object({
   approvalPollIntervalMs: z.number().step(1).min(1_000).max(3_600_000).default(60_000),
   approvalMaxCandidates: z.number().step(1).min(1).max(1_000).default(100),
   approvalMinimumConfidence: z.number().min(0.5).max(1).default(0.9),
+  approvalReviewEnabled: z.boolean().default(true),
+  approvalReviewProvider: z.string(),
+  approvalReviewModel: z.string(),
+  approvalReviewMaxTokens: z.number().step(1).min(64).max(4_096).default(512),
   leaseTimeoutMs: z.number().step(1).min(100).max(60_000).default(30_000),
   leaseStaleMs: z.number().step(1).min(5_000).max(600_000).default(120_000),
   disposeTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
@@ -1907,6 +1924,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       () => approvalRunners.register(governedApprovalRunner),
       'dsh-mmem: governed scheduled approval runner',
     )
+    if (config.approvalReviewEnabled !== false) {
+      const evaluator = createDshMemoryApprovalReviewEvaluatorV1({
+        driver: createDshAgentApprovalReviewSessionDriverV1(ctx),
+        ...(config.approvalReviewProvider === undefined ? {} : { provider: config.approvalReviewProvider }),
+        ...(config.approvalReviewModel === undefined ? {} : { model: config.approvalReviewModel }),
+        maxTokens: config.approvalReviewMaxTokens ?? 512,
+      })
+      ctx.effect(
+        () => approvalReviewEvaluators.register(evaluator),
+        'dsh-mmem: isolated DSH Agent Session approval evaluator',
+      )
+    }
   }
   if (config.settingsPath !== undefined) {
     const approvalScheduler = createMemoryApprovalSchedulerV1({
