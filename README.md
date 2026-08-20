@@ -16,7 +16,7 @@
 - 第三阶段 `MemorySpaceGovernanceResolverV1`：Settings Host 只凭 DSH `SessionHeader` 解析 Active Space，Owner 由可信 loopback Adapter 固定；人工审批复用统一治理 facade，只读 Binding 失败关闭，候选不会跨 Space 混列。
 - 第四阶段 Memory-owned Host：独立 `@mistymoon/dsh-memory/settings-host` 在 loopback-only RPC channel 上接受 live DSH `sessionId`，由 Host 取得不可变 `SessionHeader`；已支持 Active Space Candidate 的列出、人工批准/拒绝、搜索、来源、冲突评估、编辑、合并和批量治理，浏览器不能提交 `ownerId` 或 `cwd`。
 - 第五阶段 Browser RPC client：独立 `@mistymoon/dsh-memory/settings-client` 固定连接 Memory-owned channel，只从 DSH UI 接受 live `sessionId` 与可选已绑定 Space；它校验所有 Host 响应，并为审批、编辑、合并和批量操作生成幂等 request ID。
-- 第六阶段 Settings tab MVP：独立 Settings UI 从 DSH 公共 Session list 读取当前 live Session，展示 exact Active Space、正式记忆、候选及 payload-free 来源/lineage，提供受治理的搜索/筛选与 append-only Candidate 编辑，并在读写 Binding 中提供人工批准/拒绝；冲突候选必须由 Owner 明确选择 keep-both 或 supersede。无 Session 与只读 Binding 均失败关闭。
+- 第六阶段 Settings tab MVP：独立 Settings UI 从 DSH 公共 Session list 读取当前 live Session，展示 exact Active Space、正式记忆、候选及 payload-free 来源/lineage，提供受治理的搜索/筛选与 append-only Candidate 编辑/合并，并在读写 Binding 中提供人工批准/拒绝；冲突候选必须由 Owner 明确选择 keep-both 或 supersede。无 Session 与只读 Binding 均失败关闭。
 - npm 发布边界：内部 workspace 包继续私有；唯一安装包 `@mistymoon/dsh-mmem` 聚合 Memory、临时 identity Adapter、Settings Host 和 Settings UI，并声明官方 DSH bundle patch。
 
 ## 目录
@@ -64,7 +64,7 @@ pnpm pack:npm
 
 1. 用统一 `GovernedMemoryV1` Interface 深化 Archive/governance/recall Module。
 2. 用 `MemoryPrincipalResolver` 解除 `mistymoonOwnerEligibility` 字符串依赖。
-3. 在已完成搜索/筛选、来源查看与 Candidate 编辑的 Session-bound 人工审批 MVP 上补齐合并和 partial-success 批量治理 UI；UI 不持有 Owner、Workspace、Space 或 Archive 业务规则。
+3. 在已完成搜索/筛选、来源查看与 Candidate 编辑/合并的 Session-bound 人工审批 MVP 上补齐 partial-success 批量治理 UI；UI 不持有 Owner、Workspace、Space 或 Archive 业务规则。
 4. 先发布默认人工审批的独立 MVP，再实现 `scheduled-auto`。
 5. 提供旧 `mistymoon/memory` 到新独立目录的只读 plan、exact digest、备份、Owner confirm、apply 与 rollback rehearsal。
 6. 在已完成的 Catalog、物理隔离、Runtime 路由和 Space-aware Settings governance 上，分阶段实现非传递的有限共享和显式 Federation。

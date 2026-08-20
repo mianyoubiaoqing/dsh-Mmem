@@ -340,6 +340,98 @@ describe('dsh-Mmem Settings tab', () => {
     )
   })
 
+  it('merges explicitly selected pending Candidates through append-only governance', async () => {
+    const activeSpace = {
+      spaceId: 'space-project-alpha',
+      access: 'read-write' as const,
+      bindingRevision: 'binding-merge',
+    }
+    const first = {
+      schemaVersion: 2 as const,
+      event: 'candidate' as const,
+      id: 'candidate-merge-1',
+      ownerId: 'owner-fixture',
+      scope: { version: 1 as const, kind: 'companion-reality' as const },
+      observationId: 'observation-merge-1',
+      memoryKind: 'summary' as const,
+      createdAt: '2026-08-21T00:00:00.000Z',
+      recordedAt: '2026-08-21T00:00:00.000Z',
+      content: '第一条中性候选。',
+      visibility: 'personal' as const,
+      sourceMessageId: 'message-merge-1',
+      status: 'pending' as const,
+    }
+    const second = {
+      ...first,
+      id: 'candidate-merge-2',
+      observationId: 'observation-merge-2',
+      content: '第二条中性候选。',
+      sourceMessageId: 'message-merge-2',
+    }
+    const call = vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'memory/search') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          management: { schemaVersion: 1, records: [], candidates: [first, second], audit: [] },
+        },
+      }
+      if (endpoint === 'memory/merge') return {
+        ok: true as const,
+        value: { schemaVersion: 1, activeSpace, candidate: { ...first, id: 'candidate-merged' } },
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+    const select = (id: string) => tree?.root.findByProps({
+      'aria-label': `translated:selectForMerge: ${id}`,
+    })
+    await act(async () => {
+      select(first.id)?.props.onChange({ target: { checked: true } })
+      select(second.id)?.props.onChange({ target: { checked: true } })
+    })
+    const merge = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:mergeSelected'))
+    if (merge === undefined) throw new Error('expected merge-selected button')
+    await act(async () => { merge.props.onClick() })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:mergeContent' })
+        .props.onChange({ target: { value: 'Owner 编写的完整合并候选。' } })
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:mergeForm' })
+        .props.onSubmit({ preventDefault: vi.fn() })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenCalledWith(
+      '/dsh-mmem-settings',
+      'memory/merge',
+      expect.objectContaining({
+        sessionId: 'settings-session',
+        candidateIds: [first.id, second.id],
+        content: 'Owner 编写的完整合并候选。',
+        memoryKind: 'summary',
+        visibility: 'personal',
+        requestId: expect.any(String),
+      }),
+      undefined,
+    )
+  })
+
   it('renders pending Candidates from the governed management projection', async () => {
     const searchResponse = {
       ok: true,

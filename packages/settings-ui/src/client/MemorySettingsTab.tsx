@@ -40,6 +40,13 @@ interface CandidateEditDraftV1 {
   visibility: MemoryVisibility
 }
 
+interface CandidateMergeDraftV1 {
+  candidateIds: string[]
+  content: string
+  memoryKind: MemoryKind
+  visibility: MemoryVisibility
+}
+
 const MEMORY_KINDS: readonly MemoryKind[] = [
   'preference',
   'biographical',
@@ -78,6 +85,8 @@ function SessionMemorySettingsTab({
   const [conflict, setConflict] = useState<MemoryAssessmentRpcSnapshotV1['assessment']>()
   const [sourceView, setSourceView] = useState<MemorySourceRpcSnapshotV1['source']>()
   const [editDraft, setEditDraft] = useState<CandidateEditDraftV1>()
+  const [mergeSelection, setMergeSelection] = useState<string[]>([])
+  const [mergeDraft, setMergeDraft] = useState<CandidateMergeDraftV1>()
   const [filters, setFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
   const [appliedFilters, setAppliedFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
 
@@ -86,6 +95,8 @@ function SessionMemorySettingsTab({
     setSnapshot(undefined)
     setSourceView(undefined)
     setEditDraft(undefined)
+    setMergeSelection([])
+    setMergeDraft(undefined)
     setFailed(false)
     void client.search({
       ...(appliedFilters.query.trim() === '' ? {} : { query: appliedFilters.query.trim() }),
@@ -191,6 +202,24 @@ function SessionMemorySettingsTab({
     )
   }
 
+  const saveMerge = (): void => {
+    if (busy || mergeDraft === undefined) return
+    setBusy(true)
+    setFailed(false)
+    void client.mergeCandidates(mergeDraft).then(
+      () => {
+        setBusy(false)
+        setMergeDraft(undefined)
+        setMergeSelection([])
+        setRefresh(value => value + 1)
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
   if (failed) return <p role="alert">{t('loadError')}</p>
   if (snapshot === undefined) return <p role="status">{t('loading')}</p>
   return <section className="dsh-mmem-settings">
@@ -269,10 +298,25 @@ function SessionMemorySettingsTab({
                 {t('viewSource')}
               </button>
               {candidate.status === 'pending' ? <>
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label={`${t('selectForMerge')}: ${candidate.id}`}
+                  checked={mergeSelection.includes(candidate.id)}
+                  disabled={busy || snapshot.activeSpace.access !== 'read-write'}
+                  onChange={event => {
+                    setMergeSelection(value => event.target.checked
+                      ? [...value, candidate.id]
+                      : value.filter(id => id !== candidate.id))
+                  }}
+                />
+                {t('selectForMerge')}
+              </label>
               <button
                 type="button"
                 disabled={busy || snapshot.activeSpace.access !== 'read-write'}
                 onClick={() => {
+                  setMergeDraft(undefined)
                   setEditDraft({
                     candidateId: candidate.id,
                     content: candidate.content,
@@ -294,6 +338,21 @@ function SessionMemorySettingsTab({
               </> : null}
             </div>
           </article>)}
+      <button
+        type="button"
+        disabled={busy || snapshot.activeSpace.access !== 'read-write' || mergeSelection.length < 2}
+        onClick={() => {
+          const first = snapshot.management.candidates.find(candidate => candidate.id === mergeSelection[0])
+          if (first === undefined) return
+          setEditDraft(undefined)
+          setMergeDraft({
+            candidateIds: [...mergeSelection],
+            content: '',
+            memoryKind: first.memoryKind,
+            visibility: first.visibility,
+          })
+        }}
+      >{t('mergeSelected')}</button>
     </fieldset>
     {editDraft === undefined ? null : <fieldset>
       <legend>{t('editCandidate')}</legend>
@@ -336,6 +395,50 @@ function SessionMemorySettingsTab({
         </select>
         <button type="submit" disabled={busy || editDraft.content.trim() === ''}>{t('saveEdit')}</button>
         <button type="button" disabled={busy} onClick={() => { setEditDraft(undefined) }}>{t('cancel')}</button>
+      </form>
+    </fieldset>}
+    {mergeDraft === undefined ? null : <fieldset>
+      <legend>{t('mergeCandidates')}</legend>
+      <p>{mergeDraft.candidateIds.join(', ')}</p>
+      <form
+        aria-label={t('mergeForm')}
+        onSubmit={(event) => {
+          event.preventDefault()
+          saveMerge()
+        }}
+      >
+        <textarea
+          aria-label={t('mergeContent')}
+          value={mergeDraft.content}
+          onChange={event => {
+            setMergeDraft(value => value === undefined ? value : { ...value, content: event.target.value })
+          }}
+        />
+        <select
+          aria-label={t('mergeMemoryKind')}
+          value={mergeDraft.memoryKind}
+          onChange={event => {
+            setMergeDraft(value => value === undefined
+              ? value
+              : { ...value, memoryKind: event.target.value as MemoryKind })
+          }}
+        >
+          {MEMORY_KINDS.map(kind => <option key={kind} value={kind}>{kind}</option>)}
+        </select>
+        <select
+          aria-label={t('mergeVisibility')}
+          value={mergeDraft.visibility}
+          onChange={event => {
+            setMergeDraft(value => value === undefined
+              ? value
+              : { ...value, visibility: event.target.value as MemoryVisibility })
+          }}
+        >
+          <option value="personal">personal</option>
+          <option value="confidential">confidential</option>
+        </select>
+        <button type="submit" disabled={busy || mergeDraft.content.trim() === ''}>{t('saveMerge')}</button>
+        <button type="button" disabled={busy} onClick={() => { setMergeDraft(undefined) }}>{t('cancel')}</button>
       </form>
     </fieldset>}
     {sourceView === undefined ? null : <fieldset>
