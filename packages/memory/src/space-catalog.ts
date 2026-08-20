@@ -104,6 +104,7 @@ export interface OpenMemorySpaceCatalogOptions {
 export type MemorySpaceCatalogErrorCode =
   | 'DSH_WORKSPACE_UNAVAILABLE'
   | 'DEFAULT_WRITE_SPACE_ALREADY_BOUND'
+  | 'MEMORY_SPACE_ID_INVALID'
 
 /** Public Catalog failure with a stable machine-readable code. */
 export class MemorySpaceCatalogError extends Error {
@@ -136,6 +137,17 @@ function nonEmptyString(value: unknown, field: string): string {
   return value
 }
 
+function memorySpaceId(value: unknown): string {
+  const id = nonEmptyString(value, 'space id')
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(id)) {
+    throw new MemorySpaceCatalogError(
+      'Memory Space id must be one safe path segment',
+      'MEMORY_SPACE_ID_INVALID',
+    )
+  }
+  return id
+}
+
 function isoTimestamp(value: unknown): string {
   const timestamp = nonEmptyString(value, 'createdAt')
   const parsed = new Date(timestamp)
@@ -152,7 +164,7 @@ function parseMemorySpaceV1(value: unknown): MemorySpaceV1 {
   }
   return {
     schemaVersion: 1,
-    id: nonEmptyString(value.id, 'space id'),
+    id: memorySpaceId(value.id),
     ownerId: nonEmptyString(value.ownerId, 'space ownerId'),
     name: nonEmptyString(value.name, 'space name'),
     createdAt: isoTimestamp(value.createdAt),
@@ -190,7 +202,7 @@ function parseDshWorkspaceBindingV1(value: unknown): DshWorkspaceBindingV1 {
     schemaVersion: 1,
     ownerId: nonEmptyString(value.ownerId, 'binding ownerId'),
     dshWorkspaceCwd: cwd,
-    spaceId: nonEmptyString(value.spaceId, 'binding spaceId'),
+    spaceId: memorySpaceId(value.spaceId),
     access: value.access,
     defaultWrite: value.defaultWrite,
     revision: nonEmptyString(value.revision, 'binding revision'),
@@ -299,7 +311,7 @@ class FileMemorySpaceCatalog implements MemorySpaceCatalogV1 {
     return this.#mutate(document => {
       const space: MemorySpaceV1 = {
         schemaVersion: 1,
-        id: nonEmptyString(this.createId(), 'space id'),
+        id: memorySpaceId(this.createId()),
         ownerId: nonEmptyString(request.ownerId, 'space ownerId'),
         name: nonEmptyString(request.name, 'space name'),
         createdAt: isoTimestamp(this.now().toISOString()),
@@ -320,7 +332,7 @@ class FileMemorySpaceCatalog implements MemorySpaceCatalogV1 {
 
   async bindDshWorkspace(request: BindDshWorkspaceRequestV1): Promise<DshWorkspaceBindingV1> {
     const ownerId = nonEmptyString(request.ownerId, 'binding ownerId')
-    const spaceId = nonEmptyString(request.spaceId, 'binding spaceId')
+    const spaceId = memorySpaceId(request.spaceId)
     const cwd = dshWorkspaceCwd(request.sessionHeader.cwd)
     if (cwd === undefined) {
       throw new MemorySpaceCatalogError(
@@ -391,7 +403,7 @@ class FileMemorySpaceCatalog implements MemorySpaceCatalogV1 {
     await this.#refresh()
     const requestedSpaceId = request.requestedSpaceId === undefined
       ? undefined
-      : nonEmptyString(request.requestedSpaceId, 'requested spaceId')
+      : memorySpaceId(request.requestedSpaceId)
     const binding = this.#document.bindings.find(candidate => candidate.ownerId === ownerId
       && candidate.dshWorkspaceCwd === cwd
       && (requestedSpaceId === undefined ? candidate.defaultWrite : candidate.spaceId === requestedSpaceId))

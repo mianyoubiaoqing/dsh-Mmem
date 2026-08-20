@@ -12,5 +12,8 @@ if (memory.name !== 'mistymoon-memory') {
 if (typeof memory.openMemorySpaceCatalog !== 'function') {
   throw new Error('built memory plugin is missing openMemorySpaceCatalog')
 }
+if (typeof memory.openMemorySpaceArchiveRouter !== 'function') {
+  throw new Error('built memory plugin is missing openMemorySpaceArchiveRouter')
+}
 
 console.log('dsh-Mmem built plugin smoke passed')

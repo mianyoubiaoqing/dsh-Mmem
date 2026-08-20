@@ -80,6 +80,16 @@ import {
   type MemoryLifecycleEvent,
   type SourceUse,
 } from './storage/index.js'
+import {
+  createMemorySpaceArchiveRouter,
+  type MemorySpaceArchiveRouterOptions,
+  type MemorySpaceArchiveRouterV1,
+  type MemorySpaceRecallSnapshotV1,
+} from './space-archive-router.js'
+import {
+  openMemorySpaceCatalog,
+  type MemorySpaceCatalogV1,
+} from './space-catalog.js'
 
 export * from './contracts.js'
 export * from './candidate-extraction.js'
@@ -90,6 +100,7 @@ export * from './lifecycle.js'
 export * from './domain.js'
 export * from './runtime-settings.js'
 export * from './space-catalog.js'
+export * from './space-archive-router.js'
 
 /** Cordis plugin name and durable user-message source id. */
 export const name = 'mistymoon-memory'
@@ -99,8 +110,12 @@ export const inject = ['agents', 'tools', 'mistymoonOwnerEligibility']
 
 /** Memory plugin configuration. */
 export interface Config {
-  /** Private append-only JSONL path. */
-  path: string
+  /** Legacy single-Archive JSONL path; mutually exclusive with Space mode. */
+  path?: string
+  /** Versioned Memory Space Catalog path for Space mode. */
+  spaceCatalogPath?: string
+  /** Private root containing one physical Archive directory per Memory Space. */
+  spacesRoot?: string
   /** Maximum memories included in one model-visible snapshot. */
   recallLimit?: number
   /** Optional private owner settings document read before each recall. */
@@ -123,7 +138,9 @@ export interface Config {
 
 /** Runtime schema for the memory plugin. */
 export const Config: z<Config> = z.object({
-  path: z.string().required(),
+  path: z.string(),
+  spaceCatalogPath: z.string(),
+  spacesRoot: z.string(),
   recallLimit: z.number().step(1).min(1).max(20).default(DEFAULT_RECALL_LIMIT),
   settingsPath: z.string(),
   leaseTimeoutMs: z.number().step(1).min(100).max(60_000).default(30_000),
@@ -147,6 +164,10 @@ declare module '@deepseek-ai/cordis' {
     mistymoonMemoryAdvancedRetrieval: AdvancedRetrievalRegistry
     /** Payload-free invalidation registry for disposable derived memory views. */
     mistymoonMemoryDerivedViews: DerivedMemoryViewRegistry
+    /** Owner-governed Space Catalog; available only in Space mode. */
+    dshMmemSpaceCatalog: MemorySpaceCatalogV1
+    /** DSH Session Workspace to physical Space Archive Router. */
+    dshMmemSpaceRouter: MemorySpaceArchiveRouterV1
   }
 }
 
@@ -167,6 +188,10 @@ export interface OpenMemoryArchiveOptions {
   /** Optional ID-only invalidation seam for disposable indexes and summaries. */
   derivedViewInvalidator?: DerivedMemoryViewInvalidator
 }
+
+/** Construction inputs for per-Space Archives selected from DSH Session Workspace evidence. */
+export interface OpenMemorySpaceArchiveRouterOptions
+  extends MemorySpaceArchiveRouterOptions, Omit<OpenMemoryArchiveOptions, 'path'> {}
 
 function explicitContent(text: string): string | undefined {
   const match = text.match(/(?:请|帮我)?记住[：:，,\s]*(.+)$/su)
@@ -1196,16 +1221,35 @@ export async function openMemoryArchive(options: OpenMemoryArchiveOptions): Prom
   )
 }
 
+/** Open a Router that gives each Active Memory Space its own authoritative Archive. */
+export async function openMemorySpaceArchiveRouter(
+  options: OpenMemorySpaceArchiveRouterOptions,
+): Promise<MemorySpaceArchiveRouterV1> {
+  const {
+    catalog,
+    spacesRoot,
+    ...archiveOptions
+  } = options
+  return createMemorySpaceArchiveRouter(
+    { catalog, spacesRoot },
+    path => openMemoryArchive({ ...archiveOptions, path }),
+  )
+}
+
 function userText(message: UserMessage): string {
   return message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim()
 }
 
-function recallSnapshot(snapshot: MemoryRecallSnapshotV1): string {
+function recallSnapshot(snapshot: MemoryRecallSnapshotV1 | MemorySpaceRecallSnapshotV1): string {
   return 'Relevant confirmed companion memories. Use them only when relevant; '
     + 'do not reveal confidential details without owner intent:\n'
-    + snapshot.items.map(({ memory, reasons }) => {
+    + snapshot.items.map((item) => {
+      const { memory, reasons } = item
       const receipt = reasons.map(reason => `${reason.providerId}:${reason.reason}`).join(',')
-      return `- [memory:${memory.id}; source:${memory.sourceMessageId}; reason:${receipt}] ${memory.content}`
+      const spaceReceipt = 'sourceSpaceId' in item && 'activeSpace' in snapshot
+        ? `; space:${item.sourceSpaceId}; binding:${snapshot.activeSpace.bindingRevision}`
+        : ''
+      return `- [memory:${memory.id}${spaceReceipt}; source:${memory.sourceMessageId}; reason:${receipt}] ${memory.content}`
     }).join('\n')
 }
 
@@ -1414,9 +1458,14 @@ function toolContext(
   return ownerContext(ownerEligibility(ctx).evaluateCurrentTurn(agent), channelDisclosure, currentTurnText(agent))
 }
 
+type MemoryArchiveOperations = Omit<CompanionMemoryArchive, 'dispose'>
+type MemoryToolArchiveResolver = (
+  execution: Readonly<ToolExecution>,
+) => Promise<MemoryArchiveOperations>
+
 function registerMemoryTools(
   ctx: Context,
-  archive: CompanionMemoryArchive,
+  archiveForExecution: MemoryToolArchiveResolver,
   channelDisclosure: MemoryAccessContextV1['channelDisclosure'],
 ): void {
   ctx.tools.register(defineTool({
@@ -1445,6 +1494,7 @@ function registerMemoryTools(
       render: (_args, result) => [{ type: 'text', text: `Proposed companion memory ${result.candidate.id} for owner review.` }],
     },
     async execute(args, exec) {
+      const archive = await archiveForExecution(exec)
       return {
         candidate: await archive.propose({
           context: toolContext(ctx, exec, channelDisclosure),
@@ -1480,14 +1530,15 @@ function registerMemoryTools(
           : `Found ${result.candidates.length} companion-memory ${result.candidates.length === 1 ? 'proposal' : 'proposals'}.`,
       }],
     },
-    execute(args, exec) {
-      return Promise.resolve({
+    async execute(args, exec) {
+      const archive = await archiveForExecution(exec)
+      return {
         candidates: archive.listCandidates({
           context: toolContext(ctx, exec, channelDisclosure),
           includeResolved: args.includeResolved,
           limit: boundedListLimit(args.limit),
         }),
-      })
+      }
     },
     presentCall: args => ({ card: 'generic', title: 'Review memory proposals', kind: 'search', rawInput: args }),
   }))
@@ -1536,14 +1587,15 @@ function registerMemoryTools(
           : `Found ${result.assessment.relationships.length} explainable memory relationship(s).`,
       }],
     },
-    execute(args, exec) {
+    async execute(args, exec) {
+      const archive = await archiveForExecution(exec)
       const assessment = archive.assessCandidate({
         context: toolContext(ctx, exec, channelDisclosure),
         candidateId: args.candidateId,
       })
-      return Promise.resolve({
+      return {
         assessment: { ...assessment, relationships: [...assessment.relationships] },
-      })
+      }
     },
     presentCall: args => ({ card: 'generic', title: 'Assess memory proposal', kind: 'search', rawInput: args }),
   }))
@@ -1573,6 +1625,7 @@ function registerMemoryTools(
       render: (_args, result) => [{ type: 'text', text: `Approved companion memory ${result.memory.id}.` }],
     },
     async execute(args, exec) {
+      const archive = await archiveForExecution(exec)
       if ((args.resolution === 'supersede') !== (args.supersedesMemoryId !== undefined)) {
         throw new Error('supersede resolution requires exactly one supersedesMemoryId')
       }
@@ -1611,6 +1664,7 @@ function registerMemoryTools(
       render: (_args, result) => [{ type: 'text', text: `Rejected companion-memory proposal ${result.candidate.id}.` }],
     },
     async execute(args, exec) {
+      const archive = await archiveForExecution(exec)
       return {
         candidate: await archive.rejectCandidate({
           context: toolContext(ctx, exec, channelDisclosure),
@@ -1646,13 +1700,14 @@ function registerMemoryTools(
           : `Found ${result.memories.length} companion ${result.memories.length === 1 ? 'memory' : 'memories'}.`,
       }],
     },
-    execute(args, exec) {
+    async execute(args, exec) {
+      const archive = await archiveForExecution(exec)
       const limit = boundedListLimit(args.limit)
       const query = args.query?.trim()
       const memories = query === undefined || query === ''
         ? archive.list({ context: toolContext(ctx, exec, channelDisclosure), includeInactive: args.includeInactive, limit })
         : archive.recall({ context: toolContext(ctx, exec, channelDisclosure), query, limit })
-      return Promise.resolve({ memories })
+      return { memories }
     },
     presentCall: args => ({ card: 'generic', title: 'Review companion memory', kind: 'search', rawInput: args }),
   }))
@@ -1673,6 +1728,7 @@ function registerMemoryTools(
       render: (_args, result) => [{ type: 'text', text: `Forgot companion memory ${result.memory.id}.` }],
     },
     async execute(args, exec) {
+      const archive = await archiveForExecution(exec)
       return {
         memory: await archive.forget({
           context: toolContext(ctx, exec, channelDisclosure),
@@ -1701,6 +1757,7 @@ function registerMemoryTools(
       render: (_args, result) => [{ type: 'text', text: `Replaced companion memory ${result.memory.supersedesMemoryId ?? ''}.` }],
     },
     async execute(args, exec) {
+      const archive = await archiveForExecution(exec)
       return {
         memory: await archive.replace({
           context: toolContext(ctx, exec, channelDisclosure),
@@ -1758,10 +1815,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   if (maxTransactionBytes > maxArchiveBytes) {
     throw new TypeError('mistymoon-memory: maxTransactionBytes must not exceed maxArchiveBytes')
   }
+  const legacyMode = config.path !== undefined
+  const spaceMode = config.spaceCatalogPath !== undefined || config.spacesRoot !== undefined
+  if (legacyMode === spaceMode
+    || (spaceMode && (config.spaceCatalogPath === undefined || config.spacesRoot === undefined))) {
+    throw new TypeError('mistymoon-memory: configure either path or both spaceCatalogPath and spacesRoot')
+  }
   const advancedRetrieval = new AdvancedRetrievalRegistry()
   const derivedViews = new DerivedMemoryViewRegistry()
-  const archive = await openMemoryArchive({
-    path: config.path,
+  const archiveOptions: Omit<OpenMemoryArchiveOptions, 'path'> = {
     leaseTimeoutMs: config.leaseTimeoutMs ?? 30_000,
     leaseStaleMs: config.leaseStaleMs ?? 120_000,
     disposeTimeoutMs: config.disposeTimeoutMs ?? 5_000,
@@ -1769,9 +1831,32 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     maxTransactionBytes,
     retrievalEngine: new MemoryRetrievalEngine({ advancedProviderSource: advancedRetrieval }),
     derivedViewInvalidator: derivedViews,
-  })
+  }
+  const archive = config.path === undefined
+    ? undefined
+    : await openMemoryArchive({ ...archiveOptions, path: config.path })
+  const catalog = config.spaceCatalogPath === undefined
+    ? undefined
+    : await openMemorySpaceCatalog({
+        path: config.spaceCatalogPath,
+        leaseTimeoutMs: config.leaseTimeoutMs ?? 30_000,
+        leaseStaleMs: config.leaseStaleMs ?? 120_000,
+      })
+  const router = catalog === undefined || config.spacesRoot === undefined
+    ? undefined
+    : await openMemorySpaceArchiveRouter({
+        ...archiveOptions,
+        catalog,
+        spacesRoot: config.spacesRoot,
+      })
   const extraction = new CandidateExtractionRegistry()
-  ctx.effect(() => ctx.provide('mistymoonMemory', archive), 'mistymoon-memory: shared archive')
+  if (archive !== undefined) {
+    ctx.effect(() => ctx.provide('mistymoonMemory', archive), 'mistymoon-memory: shared archive')
+  }
+  if (catalog !== undefined && router !== undefined) {
+    ctx.effect(() => ctx.provide('dshMmemSpaceCatalog', catalog), 'dsh-mmem: Memory Space Catalog')
+    ctx.effect(() => ctx.provide('dshMmemSpaceRouter', router), 'dsh-mmem: Space Archive Router')
+  }
   ctx.effect(
     () => ctx.provide('mistymoonMemoryCandidateExtraction', extraction),
     'mistymoon-memory: candidate extraction Provider registry',
@@ -1784,26 +1869,61 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     () => ctx.provide('mistymoonMemoryDerivedViews', derivedViews),
     'mistymoon-memory: derived view invalidation registry',
   )
-  ctx.effect(
-    () => ctx.provide('mistymoonMemoryGovernance', memoryGovernanceService(ownerEligibility(ctx), archive)),
-    'mistymoon-memory: loopback governance facade',
-  )
-  ctx.effect(() => () => archive.dispose(), 'mistymoon-memory: bounded archive disposal')
+  if (archive !== undefined) {
+    ctx.effect(
+      () => ctx.provide('mistymoonMemoryGovernance', memoryGovernanceService(ownerEligibility(ctx), archive)),
+      'mistymoon-memory: loopback governance facade',
+    )
+    ctx.effect(() => () => archive.dispose(), 'mistymoon-memory: bounded archive disposal')
+  } else if (router !== undefined) {
+    ctx.effect(() => () => router.dispose(), 'dsh-mmem: bounded Space Archive disposal')
+  }
   ctx.effect(
     () => ctx.tools.guard((execution) => memoryOwnerGuard(ctx, execution)),
     'mistymoon-memory: Owner Eligibility tool guard',
   )
-  registerMemoryTools(ctx, archive, channelDisclosure)
+  if (archive !== undefined || router !== undefined) {
+    registerMemoryTools(ctx, async execution => {
+      if (archive !== undefined) return archive
+      const agent = execution.agent
+      if (agent === undefined || router === undefined) {
+        throw new Error('memory tool requires an active DSH Session Workspace')
+      }
+      const context = toolContext(ctx, execution, channelDisclosure)
+      const active = await router.resolveSession({
+        ownerId: context.ownerId,
+        sessionHeader: agent.session.header,
+      })
+      if (active.kind === 'unavailable') {
+        throw new Error(`memory tool Active Space unavailable: ${active.reason}`)
+      }
+      return active
+    }, channelDisclosure)
+  }
   ctx.on('agent/pre-step', async ({ agent }, next): Promise<PreStepDecision> => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
     const ownerMessages = ownerEligibility(ctx).ownerMessages(agent, decision.messages)
     try {
-      if (archive.inspection().state !== 'ready') return decision
+      if (archive !== undefined && archive.inspection().state !== 'ready') return decision
+      const firstOwnerMessage = ownerMessages[0]
+      if (firstOwnerMessage === undefined) return decision
+      const firstContext = ownerContext(
+        ownerEligibility(ctx).evaluateMessage(agent, firstOwnerMessage),
+        channelDisclosure,
+        userText(firstOwnerMessage),
+      )
+      const activeMemory = archive ?? await router?.resolveSession({
+        ownerId: firstContext.ownerId,
+        sessionHeader: agent.session.header,
+      })
+      if (activeMemory === undefined || ('kind' in activeMemory && activeMemory.kind === 'unavailable')) {
+        return decision
+      }
       for (const message of ownerMessages) {
         const text = userText(message)
-        if (text !== '') {
-          await archive.observeExplicit({
+        if (text !== '' && (!('access' in activeMemory) || activeMemory.access === 'read-write')) {
+          await activeMemory.observeExplicit({
             context: ownerContext(ownerEligibility(ctx).evaluateMessage(agent, message), channelDisclosure, text),
             sourceMessageId: message.id,
             text,
@@ -1813,8 +1933,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
       const query = ownerMessages.map(userText).filter(Boolean).join('\n')
       if (query === '') return decision
-      const firstOwnerMessage = ownerMessages[0]
-      if (firstOwnerMessage === undefined) return decision
       const context = ownerContext(
         ownerEligibility(ctx).evaluateMessage(agent, firstOwnerMessage),
         channelDisclosure,
@@ -1823,7 +1941,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const effectiveRecallLimit = config.settingsPath === undefined
         ? recallLimit
         : (await loadMemoryRuntimeSettings(config.settingsPath, recallLimit)).recallLimit
-      const snapshot = await archive.retrieve({ context, query, limit: effectiveRecallLimit })
+      const snapshot = await activeMemory.retrieve({ context, query, limit: effectiveRecallLimit })
       if (snapshot.items.length === 0) return decision
       const text = recallSnapshot(snapshot)
       return {
@@ -1849,21 +1967,29 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }, { prepend: true })
   ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
     const provider = extraction.current()
-    if (provider === undefined || archive.inspection().state !== 'ready' || !turnHasCompletedReply(agent, turn)) return
+    if (provider === undefined || !turnHasCompletedReply(agent, turn)
+      || (archive !== undefined && archive.inspection().state !== 'ready')) return
     const eligibility = ownerEligibility(ctx)
     const ownerMessages = currentTurnOwnerMessages(agent, turn, eligibility)
     for (const message of ownerMessages) {
       const text = userText(message)
       if (text === '') continue
+      const context = ownerContext(eligibility.evaluateMessage(agent, message), channelDisclosure, text)
+      const target = archive ?? await router?.resolveSession({
+        ownerId: context.ownerId,
+        sessionHeader: agent.session.header,
+      })
+      if (target === undefined || ('kind' in target && target.kind === 'unavailable')
+        || ('access' in target && target.access !== 'read-write')) continue
       const request: CandidateExtractionRequestV1 = {
         schemaVersion: 1,
         sessionId: String(agent.session.id),
         turn,
-        context: ownerContext(eligibility.evaluateMessage(agent, message), channelDisclosure, text),
+        context,
         evidence: [{ messageId: String(message.id), text }],
       }
       try {
-        await extractMemoryCandidates(provider, request, archive, {
+        await extractMemoryCandidates(provider, request, target, {
           signal,
           timeoutMs: config.extractionTimeoutMs ?? 3_000,
         })

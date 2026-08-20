@@ -33,12 +33,13 @@ async function execute(
   return ctx.tools.execute({ signal, callId: CallId(callId), name, arguments: args, agent })
 }
 
-function toolAgent(ctx: Context, idText: string, delegationDepth?: number): Agent {
+function toolAgent(ctx: Context, idText: string, delegationDepth?: number, cwd?: string): Agent {
   const id = SessionId(idText)
   const session = Session.create(id, [], {
     version: 0,
     id,
     createdAt: 1,
+    ...(cwd === undefined ? {} : { cwd }),
     ...(delegationDepth === undefined ? {} : { origin: 'subagent' as const, delegationDepth }),
   })
   session.append('turn/start', { turn: 1 })
@@ -70,6 +71,49 @@ function value(result: ToolExecutionResult): unknown {
 }
 
 describe('MistyMoon memory tools', () => {
+  it('lists memory from the Active Space of the tool Agent DSH Workspace', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-space-tool-'))
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(MemoryPlugin, {
+      spaceCatalogPath: join(root, 'catalog.json'),
+      spacesRoot: join(root, 'spaces'),
+      recallLimit: 4,
+    })
+    const cwd = 'D:\\workspaces\\project-alpha'
+    const space = await ctx.dshMmemSpaceCatalog.createSpace({
+      ownerId: 'owner-fixture',
+      name: 'Project Alpha',
+    })
+    await ctx.dshMmemSpaceCatalog.bindDshWorkspace({
+      ownerId: 'owner-fixture',
+      sessionHeader: { cwd },
+      spaceId: space.id,
+      access: 'read-write',
+      defaultWrite: true,
+    })
+    const routed = await ctx.dshMmemSpaceRouter.resolveSession({
+      ownerId: 'owner-fixture',
+      sessionHeader: { cwd },
+    })
+    if (routed.kind !== 'active') throw new Error('expected an Active Space')
+    await routed.observeExplicit({
+      context: PERSONAL_COMPANION_ACCESS,
+      memoryKind: 'summary',
+      sourceMessageId: 'message-space-tool-1',
+      text: '请记住：Project Alpha 使用蓝绿部署。',
+    })
+
+    const agent = toolAgent(ctx, 'space-tool-agent', undefined, cwd)
+    const listed = value(await execute(ctx, 'memory_list', { query: '蓝绿部署' }, 'call-space-list', agent))
+    expect(listed).toEqual({
+      memories: [expect.objectContaining({ content: 'Project Alpha 使用蓝绿部署。' })],
+    })
+  })
+
   it.each(DENIED_TOOL_CASES)('denies depth-one child access to %s without changing the archive', async (toolName, args) => {
     const root = await mkdtemp(join(tmpdir(), 'mistymoon-memory-child-tool-'))
     const path = join(root, 'memories.jsonl')

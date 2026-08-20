@@ -7,7 +7,8 @@
     - id: dsh-mmem-memory
       name: '@mistymoon/dsh-memory'
       config:
-        path: !!js dshHomePath('dsh-mmem', 'memory', 'memories.jsonl')
+        spaceCatalogPath: !!js dshHomePath('dsh-mmem', 'catalog.json')
+        spacesRoot: !!js dshHomePath('dsh-mmem', 'spaces')
         recallLimit: 8
         settingsPath: !!js dshHomePath('dsh-mmem', 'settings', 'settings.json')
         leaseTimeoutMs: 30000
