@@ -10,11 +10,11 @@
 - 当前测试暂需的 Owner Eligibility 实现，后续会替换为 Memory 自己拥有的 `MemoryPrincipalResolver` Interface 与 loopback/MistyMoon Adapters。
 - v2 transaction JSONL Archive、lease、checkpoint、quarantine、显式 migration/recovery。
 - Owner/authority/scope/visibility/source lineage、候选审核、冲突/supersession、BM25 recall 与 lifecycle。
-- 独立插件/定时审批提案与 2026-08-21 DSH 记忆生态调研。
 - Memory Space、DSH Workspace Binding 与完全隔离/有限互通/Federation 内完全互通的领域提案。
 - 第一阶段 `MemorySpaceCatalogV1`：版本化 Space、exact DSH `SessionHeader.cwd` Binding、唯一 Default Write、显式 Active Space 与跨进程 lease。
 - 第二阶段 `MemorySpaceArchiveRouterV1`：每 Space 独立 Archive、DSH pre-step/tool/candidate 路由、只读写入门与 Source Space/Binding recall receipt。
 - 第三阶段 `MemorySpaceGovernanceResolverV1`：Settings Host 只凭 DSH `SessionHeader` 解析 Active Space，Owner 由可信 loopback Adapter 固定；人工审批复用统一治理 facade，只读 Binding 失败关闭，候选不会跨 Space 混列。
+- 第四阶段首个 Host tracer：独立 `@mistymoon/dsh-memory/settings-host` 在 loopback-only RPC channel 上接受 live DSH `sessionId`，由 Host 取得不可变 `SessionHeader`，支持 Active Space Candidate 的列出、人工批准和拒绝；浏览器不能提交 `ownerId` 或 `cwd`。
 
 ## 目录
 
@@ -25,10 +25,6 @@ dsh-Mmem/
 │  ├─ memory/       当前 Memory implementation 迁移基线
 │  └─ identity/     临时 Owner Eligibility 兼容实现
 ├─ scripts/         maintenance 与旧数据 migration CLI
-├─ docs/
-│  ├─ standalone-plugin-proposal.md
-│  ├─ memory-space-sharing.md
-│  └─ research/dsh-memory-plugin-ecosystem-2026-08-21.md
 ├─ cordis.patch.yml 开发组合草案
 └─ AGENTS.md
 ```
@@ -40,9 +36,7 @@ dsh-Mmem/
 
 CI/CD 只负责中性测试、构建和发布审计，绝不访问真实用户记忆。若模型参与审核，它只返回不可信结构化建议；Memory 在提交前重新校验 Owner、scope、来源、冲突、策略 revision 与 Archive generation。
 
-详细设计见 [独立插件提案](docs/standalone-plugin-proposal.md)，竞品与市场判断见 [生态调研](docs/research/dsh-memory-plugin-ecosystem-2026-08-21.md)。
-
-Memory Space 设计见 [DSH Workspace 绑定与跨空间共享提案](docs/memory-space-sharing.md)。DSH 是 Workspace 身份与生命周期的唯一权威；dsh-Mmem 不创建 `Workspace Reference`。这里的 `Memory Space` 表示独立治理/召回空间；现有 `Memory Scope` 仍只表示事实属于哪个现实或叙事范围，三者不会合并。
+Memory Space、Scope、Binding 与共享术语以 `CONTEXT.md` 为准。DSH 是 Workspace 身份与生命周期的唯一权威；dsh-Mmem 不创建平行的 Workspace 标识。这里的 `Memory Space` 表示独立治理/召回空间，`Memory Scope` 仍只表示事实属于哪个现实或叙事范围，三者不会合并。
 
 ## 开发
 
@@ -59,7 +53,7 @@ pnpm check
 
 1. 用统一 `GovernedMemoryV1` Interface 深化 Archive/governance/recall Module。
 2. 用 `MemoryPrincipalResolver` 解除 `mistymoonOwnerEligibility` 字符串依赖。
-3. 从 MistyMoon Settings UI 提取 Memory-owned Host/client，并让 Host 只通过 `MemorySpaceGovernanceResolverV1` 审核 Active Space。
+3. 在已完成的 Memory-owned Host tracer 上迁移 search/source/assess/edit/merge/batch endpoints，再提取独立 Settings client；所有操作只通过 `MemorySpaceGovernanceResolverV1` 审核 Active Space。
 4. 先发布默认人工审批的独立 MVP，再实现 `scheduled-auto`。
 5. 提供旧 `mistymoon/memory` 到新独立目录的只读 plan、exact digest、备份、Owner confirm、apply 与 rollback rehearsal。
 6. 在已完成的 Catalog、物理隔离、Runtime 路由和 Space-aware Settings governance 上，分阶段实现非传递的有限共享和显式 Federation。

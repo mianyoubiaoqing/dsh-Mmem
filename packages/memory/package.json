@@ -62,6 +62,10 @@
     "./space-archive-router": {
       "types": "./lib/space-archive-router.d.ts",
       "default": "./lib/space-archive-router.js"
+    },
+    "./settings-host": {
+      "types": "./lib/settings-host.d.ts",
+      "default": "./lib/settings-host.js"
     }
   },
   "scripts": {

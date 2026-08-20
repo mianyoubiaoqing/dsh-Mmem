@@ -17,3 +17,6 @@
         maxArchiveBytes: 67108864
         maxTransactionBytes: 1048576
         channelDisclosure: personal-only
+
+    - id: dsh-mmem-settings-host
+      name: '@mistymoon/dsh-memory/settings-host'
