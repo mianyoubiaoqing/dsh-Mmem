@@ -1,0 +1,34 @@
+/** Simplified Chinese dictionary and key source of truth. */
+export const zh = {
+  tab: 'dsh-Mmem 记忆',
+  openSession: '请先在 DSH 中打开一个会话，再管理该会话工作区绑定的记忆分区。',
+  loading: '正在读取当前会话的受治理记忆…',
+  loadError: '无法读取或更新当前记忆分区，请刷新会话后重试。',
+  activeSpace: '当前记忆分区',
+  candidates: '待审核记忆',
+  noCandidates: '当前没有匹配的记忆候选。',
+  approve: '批准',
+  reject: '拒绝',
+  conflict: '需要冲突决策',
+  keepBoth: '保留两者',
+  supersede: '用候选替代此记忆',
+} satisfies Record<string, string>
+
+/** Locale key union shared by the component and slot registration. */
+export type MemorySettingsLocaleKey = keyof typeof zh
+
+/** English dictionary checked against the Chinese key set. */
+export const en = {
+  tab: 'dsh-Mmem Memory',
+  openSession: 'Open a DSH session before managing the Memory Space bound to its Workspace.',
+  loading: 'Loading governed memory for the current Session…',
+  loadError: 'The current Memory Space could not be read or updated. Refresh the Session and try again.',
+  activeSpace: 'Active Memory Space',
+  candidates: 'Memory candidates',
+  noCandidates: 'No matching Memory candidates.',
+  approve: 'Approve',
+  reject: 'Reject',
+  conflict: 'Conflict resolution required',
+  keepBoth: 'Keep both',
+  supersede: 'Supersede this memory',
+} satisfies Record<MemorySettingsLocaleKey, string>

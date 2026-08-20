@@ -10,7 +10,7 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "build": "pnpm --filter @mistymoon/dsh-identity run build && pnpm --filter @mistymoon/dsh-memory run build",
+    "build": "pnpm --filter @mistymoon/dsh-identity run build && pnpm --filter @mistymoon/dsh-memory run build && pnpm --filter @mistymoon/dsh-memory-settings-ui run build",
     "test": "pnpm --filter @mistymoon/dsh-identity run build && vitest run",
     "typecheck": "pnpm --filter @mistymoon/dsh-identity run build && tsc -b",
     "smoke:built": "node scripts/smoke-built.mjs",
