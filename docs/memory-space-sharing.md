@@ -1,6 +1,6 @@
 # Memory Space、DSH Workspace 绑定与跨空间共享提案
 
-状态：领域与产品提案；不授权修改 Archive schema、迁移真实档案或启用跨空间召回。
+状态：领域与产品提案；阶段 1 Space Catalog/DSH Workspace Binding seam 已实现，尚未接入 Archive 路由；不授权迁移真实档案或启用跨空间召回。
 
 基线：`dsh-Mmem` 迁移仓库，DSH `0.1.0-rc.7`，2026-08-21。
 
@@ -258,7 +258,7 @@ Space A 记录“部署必须使用蓝绿策略”，Space B 记录“该遗留�
 
 ## 分阶段实施
 
-1. **Space Catalog**：只增加 Space/DSH Workspace Binding/Default Write 的版本化模型与中性 tests；Recall 仍 exact one Space。
+1. **Space Catalog（seam 已完成）**：已增加 Space/DSH Workspace Binding/Default Write 的版本化模型、中性 tests、跨进程 lease 与 exact DSH `SessionHeader.cwd` 适配；尚未接入 Archive/Recall。
 2. **Physical Isolation**：每 Space Archive、独立 health/backup/quarantine；把现有 v2 Archive 显式迁入 Owner 选择的 default Space。
 3. **Shared Space**：允许多个 DSH Workspace 直接绑定同一个 Space，不做跨 Space 扩展。
 4. **Selective Grants**：单向、过滤、非传递、只读，先做 access plan/preview 再接真实 recall。

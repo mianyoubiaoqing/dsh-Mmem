@@ -12,6 +12,7 @@
 - Owner/authority/scope/visibility/source lineage、候选审核、冲突/supersession、BM25 recall 与 lifecycle。
 - 独立插件/定时审批提案与 2026-08-21 DSH 记忆生态调研。
 - Memory Space、DSH Workspace Binding 与完全隔离/有限互通/Federation 内完全互通的领域提案。
+- 第一阶段 `MemorySpaceCatalogV1`：版本化 Space、exact DSH `SessionHeader.cwd` Binding、唯一 Default Write、显式 Active Space 与跨进程 lease。
 
 ## 目录
 
@@ -59,7 +60,7 @@ pnpm check
 3. 从 MistyMoon Settings UI 提取 Memory-owned Host/client。
 4. 先发布默认人工审批的独立 MVP，再实现 `scheduled-auto`。
 5. 提供旧 `mistymoon/memory` 到新独立目录的只读 plan、exact digest、备份、Owner confirm、apply 与 rollback rehearsal。
-6. 分阶段实现 Memory Space Catalog、DSH Workspace Binding、非传递的有限共享和显式 Federation。
+6. 把已完成的 Memory Space Catalog/DSH Workspace Binding 接入 DSH Runtime，再分阶段实现物理隔离、非传递的有限共享和显式 Federation。
 
 ## 许可证
 

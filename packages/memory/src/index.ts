@@ -89,6 +89,7 @@ export * from './advanced-retrieval.js'
 export * from './lifecycle.js'
 export * from './domain.js'
 export * from './runtime-settings.js'
+export * from './space-catalog.js'
 
 /** Cordis plugin name and durable user-message source id. */
 export const name = 'mistymoon-memory'
