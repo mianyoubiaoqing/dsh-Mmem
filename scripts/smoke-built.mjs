@@ -28,6 +28,9 @@ if (typeof memory.openMemorySpaceArchiveRouter !== 'function') {
 if (typeof memory.createMemoryApprovalSchedulerV1 !== 'function') {
   throw new Error('built memory plugin is missing createMemoryApprovalSchedulerV1')
 }
+if (typeof memory.createGovernedMemoryScheduledApprovalRunnerV1 !== 'function') {
+  throw new Error('built memory plugin is missing createGovernedMemoryScheduledApprovalRunnerV1')
+}
 if (settingsHost.name !== 'dsh-mmem-settings-host') {
   throw new Error(`unexpected Memory Settings Host plugin name: ${String(settingsHost.name)}`)
 }

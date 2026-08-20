@@ -64,6 +64,7 @@ describe('Memory scheduled approval lifecycle', () => {
       approvedCandidates: 2,
       rejectedCandidates: 1,
       deferredCandidates: 1,
+      reviewReceipts: [],
     }))
     target.runners.register({ id: 'fixture', version: '1', run })
     const scheduler = createMemoryApprovalSchedulerV1(target.options)
@@ -83,6 +84,7 @@ describe('Memory scheduled approval lifecycle', () => {
         approvedCandidates: 2,
         rejectedCandidates: 1,
         deferredCandidates: 1,
+        reviewReceipts: [],
       },
     })
     await expect(createMemoryApprovalSchedulerV1(target.options).check()).resolves.toMatchObject({
@@ -103,6 +105,7 @@ describe('Memory scheduled approval lifecycle', () => {
         approvedCandidates: 0,
         rejectedCandidates: 0,
         deferredCandidates: 0,
+        reviewReceipts: [],
       }
     })
     target.runners.register({ id: 'fixture', version: '1', run })
@@ -154,6 +157,7 @@ describe('Memory scheduled approval lifecycle', () => {
           approvedCandidates: 0,
           rejectedCandidates: 0,
           deferredCandidates: 0,
+          reviewReceipts: [],
         }
       },
     })

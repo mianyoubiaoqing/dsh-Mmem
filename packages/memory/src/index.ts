@@ -53,6 +53,10 @@ import {
   createMemoryApprovalSchedulerV1,
 } from './approval-scheduler.js'
 import {
+  MemoryApprovalReviewEvaluatorRegistryV1,
+  createGovernedMemoryScheduledApprovalRunnerV1,
+} from './approval-review.js'
+import {
   CandidateExtractionRegistry,
   extractMemoryCandidates,
   type CandidateExtractionRequestV1,
@@ -120,6 +124,7 @@ export * from './principal.js'
 export * from './approval-policy.js'
 export * from './approval-schedule.js'
 export * from './approval-scheduler.js'
+export * from './approval-review.js'
 
 /** Cordis plugin name and durable user-message source id. */
 export const name = 'mistymoon-memory'
@@ -143,6 +148,10 @@ export interface Config {
   approvalSchedulerPath?: string
   /** Local scheduler policy polling interval. */
   approvalPollIntervalMs?: number
+  /** Maximum Candidates considered by one scheduled run across all Spaces. */
+  approvalMaxCandidates?: number
+  /** Minimum evaluator confidence required before any automatic decision. */
+  approvalMinimumConfidence?: number
   /** Maximum time to wait for the cross-process archive lease. */
   leaseTimeoutMs?: number
   /** Age after which an unrefreshed archive lease may be reclaimed. */
@@ -168,6 +177,8 @@ export const Config: z<Config> = z.object({
   settingsPath: z.string(),
   approvalSchedulerPath: z.string(),
   approvalPollIntervalMs: z.number().step(1).min(1_000).max(3_600_000).default(60_000),
+  approvalMaxCandidates: z.number().step(1).min(1).max(1_000).default(100),
+  approvalMinimumConfidence: z.number().min(0.5).max(1).default(0.9),
   leaseTimeoutMs: z.number().step(1).min(100).max(60_000).default(30_000),
   leaseStaleMs: z.number().step(1).min(5_000).max(600_000).default(120_000),
   disposeTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
@@ -1873,10 +1884,30 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     throw new TypeError('mistymoon-memory: approvalSchedulerPath requires settingsPath')
   }
   const approvalRunners = new MemoryScheduledApprovalRunnerRegistryV1()
+  const approvalReviewEvaluators = new MemoryApprovalReviewEvaluatorRegistryV1()
   ctx.effect(
     () => ctx.provide('dshMmemScheduledApprovalRunners', approvalRunners),
     'dsh-mmem: scheduled approval runner registry',
   )
+  ctx.effect(
+    () => ctx.provide('dshMmemApprovalReviewEvaluators', approvalReviewEvaluators),
+    'dsh-mmem: DSH-logged approval review evaluator registry',
+  )
+  if (config.settingsPath !== undefined && catalog !== undefined && router !== undefined) {
+    const governedApprovalRunner = createGovernedMemoryScheduledApprovalRunnerV1({
+      principalResolver: principalResolver(ctx),
+      catalog,
+      router,
+      settings: runtimeSettings,
+      evaluators: approvalReviewEvaluators,
+      maxCandidates: config.approvalMaxCandidates ?? 100,
+      minimumConfidence: config.approvalMinimumConfidence ?? 0.9,
+    })
+    ctx.effect(
+      () => approvalRunners.register(governedApprovalRunner),
+      'dsh-mmem: governed scheduled approval runner',
+    )
+  }
   if (config.settingsPath !== undefined) {
     const approvalScheduler = createMemoryApprovalSchedulerV1({
       settings: runtimeSettings,
