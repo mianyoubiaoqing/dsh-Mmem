@@ -34,6 +34,8 @@ Candidate edits and merges are append-only governance operations. They create a 
 
 The loopback Settings RPC client exposes the operations used by the dedicated Memory management tab and is backed only by the context-free governance facade. It accepts a live DSH Session ID and an optional already-bound Space, never Owner or Workspace identity, and validates Host responses before exposing them to UI code. Search and filters run after Archive scope/confidential gates; source views expose identifiers and lineage rather than original DSH message content. Batch review reports one outcome per independently atomic candidate decision, so partial success is explicit and safely retryable. The current UI covers Session-bound search/filter, governed record/Candidate display, payload-free provenance, append-only Candidate editing/merge, manual approval/rejection, explicit conflict resolution, and partial-success batch controls.
 
+Private runtime settings now carry a versioned approval policy. Missing or legacy policy fields resolve to revision-zero `manual`; `scheduled-auto` can be persisted only with an explicit IANA time zone, 24-hour local time, and the exact previously observed revision. Updates take a cross-process lease, so concurrent writers cannot both commit from the same revision. Policy persistence alone never starts an approval run; the local scheduler remains a follow-up Module.
+
 Current limitations:
 
 - The current `local-dsh-host-rpc` authority supports only the default loopback Web single-Owner deployment. Other channels remain fail-closed until they supply an authenticated authority adapter.
