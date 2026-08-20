@@ -71,6 +71,62 @@ describe('dsh-Mmem Settings tab', () => {
     expect(JSON.stringify(tree?.toJSON())).toContain('space-project-alpha')
   })
 
+  it('applies Owner search and filters within the current DSH Session', async () => {
+    const call = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: 'space-project-alpha',
+          access: 'read-write',
+          bindingRevision: 'binding-search',
+        },
+        management: { schemaVersion: 1, records: [], candidates: [], audit: [] },
+      },
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+
+    const control = (label: string) => tree?.root.find(
+      node => node.props['aria-label'] === `translated:${label}`,
+    )
+    await act(async () => {
+      control('searchQuery')?.props.onChange({ target: { value: 'neutral preference' } })
+      control('memoryKind')?.props.onChange({ target: { value: 'preference' } })
+      control('visibility')?.props.onChange({ target: { value: 'confidential' } })
+      control('candidateStatus')?.props.onChange({ target: { value: 'all' } })
+    })
+    await act(async () => {
+      tree?.root.findByType('form').props.onSubmit({ preventDefault: vi.fn() })
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenLastCalledWith(
+      '/dsh-mmem-settings',
+      'memory/search',
+      {
+        sessionId: 'settings-session',
+        query: 'neutral preference',
+        memoryKind: 'preference',
+        visibility: 'confidential',
+        recordStatus: 'all',
+        candidateStatus: 'all',
+        limit: 200,
+      },
+      expect.any(AbortSignal),
+    )
+  })
+
   it('renders pending Candidates from the governed management projection', async () => {
     const searchResponse = {
       ok: true,
