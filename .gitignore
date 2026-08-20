@@ -12,6 +12,7 @@ coverage/
 .env.*
 .artifacts/
 .tmp/
+docs/
 
 # Never store private DSH or Memory homes in the repository.
 dsh-home/

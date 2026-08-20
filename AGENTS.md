@@ -1,6 +1,6 @@
 # dsh-Mmem Agent 协作约定
 
-本仓库用于把 MistyMoon 的 Memory 能力演化为独立 DeepSeek Harness（DSH）插件。修改前必须阅读本文件、`README.md`、`docs/standalone-plugin-proposal.md` 与受影响包的说明。
+本仓库用于把 MistyMoon 的 Memory 能力演化为独立 DeepSeek Harness（DSH）插件。修改前必须阅读本文件、`README.md`、`CONTEXT.md` 与受影响包的说明。
 
 ## 产品不变量
 
