@@ -1,0 +1,73 @@
+# Governed Memory
+
+dsh-Mmem 管理可追溯、可审核并按明确访问关系召回的长期记忆。它区分事实所属的语义范围、记忆所在的空间，以及 DSH Workspace 被授予的读取和写入关系。
+
+## Ownership and meaning
+
+**Owner**:
+拥有、配置并治理一组记忆空间的人；模型、DSH Workspace 或 Provider 都不能自行取得 Owner 权限。
+_Avoid_: User、当前说话者、Agent
+
+**Memory Scope**:
+一条记忆在事实语义上成立的世界或叙事范围；它与存储位置和 DSH Workspace 访问权正交。
+_Avoid_: Memory Space、DSH Workspace、分区
+
+**Memory Kind**:
+一条记忆的稳定治理类别，用于决定审批、共享、有效期和召回规则；它不是模型生成的 topic 或检索标签。
+_Avoid_: tag、embedding class、Memory Scope
+
+**Source Space**:
+一条 Observation、Candidate 或 Confirmed Memory 唯一归属的 Memory Space；跨空间召回不会改变该归属。
+_Avoid_: 当前 DSH Workspace、召回目标、复制空间
+
+## Spaces and DSH workspaces
+
+**Memory Space**:
+Owner 创建的独立治理与召回单元，一条记忆恰好属于一个 Memory Space。
+_Avoid_: Memory Scope、数据库分区、文件夹
+
+**DSH Workspace**:
+由 DSH 创建、识别并为 Session 提供工作上下文的 Workspace；dsh-Mmem 只消费这一身份，不创建自己的 Workspace 模型。
+_Avoid_: Workspace Reference、任意路径、项目名、Memory Space
+
+**Workspace Binding**:
+一个 DSH Workspace 与一个 Memory Space 之间由 Owner 建立的读取或读写关系。
+_Avoid_: 自动发现、路径匹配、Space Share Grant
+
+**Default Write Space**:
+一个 DSH Workspace 的新 Observation 与 Candidate 默认进入的唯一 Memory Space。
+_Avoid_: 当前查询空间、全局空间、最近使用空间
+
+**Active Space**:
+一个 DSH Session 当前用于写入和开始召回的 Memory Space，必须来自该 Session 所属 DSH Workspace 的有效 Binding。
+_Avoid_: 所有已绑定空间、最近命中空间、Source Space
+
+## Inter-space sharing
+
+**Inter-Space Mode**:
+Owner 对跨 Memory Space 召回的总开关，取 Isolated、Selective 或 Federated；它不改变 Workspace Binding 或记忆归属。
+_Avoid_: 网络权限、同步模式、Memory Scope
+
+**Isolated**:
+只召回当前 Session 的 Active Space，不执行跨空间扩展。
+_Avoid_: 离线模式、私密可见性
+
+**Selective**:
+只按显式 Space Share Grant 扩展召回，并应用该 Grant 的稳定过滤条件。
+_Avoid_: 自动相关空间、模型选择共享
+
+**Federated**:
+在 Owner 明确选择的 Space Federation 内执行完整跨空间召回；新建空间不会自动加入。
+_Avoid_: 全局所有空间、无限制访问
+
+**Space Share Grant**:
+Source Space 授予一个目标 Memory Space 的单向只读召回关系；Grant 不传递，也不允许目标修改来源记录。
+_Avoid_: Workspace Binding、复制、同步
+
+**Space Federation**:
+Owner 明确列出的一组可完全互相召回的 Memory Space；成员关系是显式且版本化的。
+_Avoid_: 所有空间、默认全局组、DSH Workspace group
+
+**Borrowed Recall**:
+依据 Space Share Grant 或 Space Federation 从非直接空间选出的只读召回项，其 receipt 保留 Source Space 与授权关系。
+_Avoid_: 导入、复制记忆、本地记忆

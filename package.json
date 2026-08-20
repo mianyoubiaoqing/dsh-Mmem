@@ -1,0 +1,31 @@
+{
+  "name": "dsh-mmem-workspace",
+  "version": "0.0.1-standalone.0",
+  "description": "Standalone governed memory plugin workspace for DeepSeek Harness",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @mistymoon/dsh-identity run build && pnpm --filter @mistymoon/dsh-memory run build",
+    "test": "pnpm --filter @mistymoon/dsh-identity run build && vitest run",
+    "typecheck": "pnpm --filter @mistymoon/dsh-identity run build && tsc -b",
+    "smoke:built": "node scripts/smoke-built.mjs",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run build && pnpm run smoke:built"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-agent": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.7",
+    "@types/node": "^22.20.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

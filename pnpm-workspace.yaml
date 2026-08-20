@@ -1,0 +1,8 @@
+packages:
+  - packages/*
+
+allowBuilds:
+  esbuild: true
+
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/*'

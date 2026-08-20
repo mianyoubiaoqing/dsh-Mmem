@@ -1,0 +1,18 @@
+- insert:
+    - id: dsh-mmem-identity-compat
+      name: '@mistymoon/dsh-identity'
+      config:
+        ownerId: local-owner
+
+    - id: dsh-mmem-memory
+      name: '@mistymoon/dsh-memory'
+      config:
+        path: !!js dshHomePath('dsh-mmem', 'memory', 'memories.jsonl')
+        recallLimit: 8
+        settingsPath: !!js dshHomePath('dsh-mmem', 'settings', 'settings.json')
+        leaseTimeoutMs: 30000
+        leaseStaleMs: 120000
+        disposeTimeoutMs: 5000
+        maxArchiveBytes: 67108864
+        maxTransactionBytes: 1048576
+        channelDisclosure: personal-only

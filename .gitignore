@@ -1,0 +1,19 @@
+node_modules/
+lib/
+dist/
+coverage/
+*.tgz
+*.log
+*.jsonl
+*.sqlite
+*.sqlite3
+*.tsbuildinfo
+.env
+.env.*
+.artifacts/
+.tmp/
+
+# Never store private DSH or Memory homes in the repository.
+dsh-home/
+private/
+data/

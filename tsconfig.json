@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/identity" },
+    { "path": "./packages/memory" }
+  ]
+}
