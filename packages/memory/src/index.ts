@@ -90,6 +90,11 @@ import {
   openMemorySpaceCatalog,
   type MemorySpaceCatalogV1,
 } from './space-catalog.js'
+import {
+  createMemoryGovernanceService,
+  createMemorySpaceGovernanceResolver,
+  type MemorySpaceGovernanceResolverV1,
+} from './space-governance.js'
 
 export * from './contracts.js'
 export * from './candidate-extraction.js'
@@ -101,6 +106,7 @@ export * from './domain.js'
 export * from './runtime-settings.js'
 export * from './space-catalog.js'
 export * from './space-archive-router.js'
+export * from './space-governance.js'
 
 /** Cordis plugin name and durable user-message source id. */
 export const name = 'mistymoon-memory'
@@ -168,6 +174,8 @@ declare module '@deepseek-ai/cordis' {
     dshMmemSpaceCatalog: MemorySpaceCatalogV1
     /** DSH Session Workspace to physical Space Archive Router. */
     dshMmemSpaceRouter: MemorySpaceArchiveRouterV1
+    /** Loopback-only Settings governance resolved from a DSH Session Workspace. */
+    dshMmemSpaceGovernance: MemorySpaceGovernanceResolverV1
   }
 }
 
@@ -1785,18 +1793,7 @@ function memoryGovernanceService(
     channelDisclosure: 'owner-confidential',
     requestIntent: 'explicit-confidential-recall',
   }
-  return {
-    listCandidates: input => archive.listCandidates({ context, ...input }),
-    assessCandidate: input => archive.assessCandidate({ context, ...input }),
-    editCandidate: input => archive.editCandidate({ context, ...input }),
-    mergeCandidates: input => archive.mergeCandidates({ context, ...input }),
-    listGovernanceAudit: input => archive.listGovernanceAudit({ context, ...input }),
-    manage: input => archive.manage({ context, ...input }),
-    sourceView: input => archive.sourceView({ context, ...input }),
-    batchDecide: input => archive.batchDecide({ context, ...input }),
-    approveCandidate: input => archive.approveCandidate({ context, ...input }),
-    rejectCandidate: input => archive.rejectCandidate({ context, ...input }),
-  }
+  return createMemoryGovernanceService(context, archive)
 }
 
 /**
@@ -1856,6 +1853,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   if (catalog !== undefined && router !== undefined) {
     ctx.effect(() => ctx.provide('dshMmemSpaceCatalog', catalog), 'dsh-mmem: Memory Space Catalog')
     ctx.effect(() => ctx.provide('dshMmemSpaceRouter', router), 'dsh-mmem: Space Archive Router')
+    const eligibility = ownerEligibility(ctx)
+    const identity = eligibility.trustedLocalOwner?.()
+    if (identity === undefined) throw new Error('memory governance requires a trusted local Owner adapter')
+    const governanceContext: MemoryAccessContextV1 = {
+      version: 1,
+      ownerId: identity.ownerId,
+      authority: identity.authority,
+      scope: COMPANION_SCOPE,
+      channelDisclosure: 'owner-confidential',
+      requestIntent: 'explicit-confidential-recall',
+    }
+    ctx.effect(
+      () => ctx.provide(
+        'dshMmemSpaceGovernance',
+        createMemorySpaceGovernanceResolver(governanceContext, router),
+      ),
+      'dsh-mmem: loopback Space governance resolver',
+    )
   }
   ctx.effect(
     () => ctx.provide('mistymoonMemoryCandidateExtraction', extraction),

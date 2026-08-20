@@ -194,6 +194,10 @@ dsh-mmem/
 
 ## 设置体验
 
+当前已提供 `MemorySpaceGovernanceResolverV1` 作为 Settings Host 的治理 seam。Host 只传入当前 DSH Session 的 `header.cwd` 与可选的已绑定 Space；Resolver 在插件加载时固定可信本机 Owner，浏览器请求不能选择 `ownerId`、scope 或底层 Archive。返回的 facade 恰好绑定一个 Active Space：只读 Binding 可以检查候选和审计，但批准、拒绝、编辑与批量决定由 Archive Router 统一以 `MEMORY_SPACE_READ_ONLY` 失败关闭；未绑定 Workspace 使用稳定的 `MEMORY_SPACE_GOVERNANCE_UNAVAILABLE` code/reason。
+
+这只是 Host-facing contract，尚未包含独立 Settings HTTP/RPC endpoint 或 client 页面。
+
 建议设置页包含：
 
 1. **Spaces**：名称、说明、绑定 DSH Workspace、Default Write、审批模式、档案健康和大小。
@@ -260,11 +264,12 @@ Space A 记录“部署必须使用蓝绿策略”，Space B 记录“该遗留�
 
 1. **Space Catalog（seam 已完成）**：已增加 Space/DSH Workspace Binding/Default Write 的版本化模型、中性 tests、跨进程 lease 与 exact DSH `SessionHeader.cwd` 适配；尚未接入 Archive/Recall。
 2. **Physical Isolation（runtime seam 已完成）**：每 Space 使用独立 Archive，DSH pre-step、tools 与 candidate extraction 均从 Session Workspace 解析 Active Space；旧 v2 Archive 的显式迁移、Space-aware maintenance/backup UI 仍未实现。
-3. **Shared Space**：允许多个 DSH Workspace 直接绑定同一个 Space，不做跨 Space 扩展。
-4. **Selective Grants**：单向、过滤、非传递、只读，先做 access plan/preview 再接真实 recall。
-5. **Federation**：显式成员、完整 receipts、budget 与 cross-space conflict 行为。
-6. **Per-Space Approval**：manual / scheduled-auto 与 Space policy 结合。
-7. **Evaluation**：跨 Space leakage、grant revocation、confidential gate、冲突、Windows 多 Archive 性能和 DSH 日志重建。
+3. **Space-aware Settings Governance（seam 已完成）**：可信 loopback Owner + DSH Session Workspace 解析单一 Active Space；人工审核复用 Archive 治理规则，并覆盖只读失败关闭、未绑定错误和 Candidate 隔离。独立 Host/client 尚未实现。
+4. **Shared Space**：允许多个 DSH Workspace 直接绑定同一个 Space，不做跨 Space 扩展。
+5. **Selective Grants**：单向、过滤、非传递、只读，先做 access plan/preview 再接真实 recall。
+6. **Federation**：显式成员、完整 receipts、budget 与 cross-space conflict 行为。
+7. **Per-Space Approval**：manual / scheduled-auto 与 Space policy 结合。
+8. **Evaluation**：跨 Space leakage、grant revocation、confidential gate、冲突、Windows 多 Archive 性能和 DSH 日志重建。
 
 不要把 Archive v3、Settings UI、跨空间检索、迁移和自动审批放进同一个提交或版本。
 
