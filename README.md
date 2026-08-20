@@ -19,7 +19,8 @@
 - 第六阶段 Settings 管理 UI：从 DSH 公共 Session list 读取当前 live Session，展示 exact Active Space、正式记忆、候选及 payload-free 来源/lineage，提供受治理的搜索/筛选、append-only Candidate 编辑/合并、人工批准/拒绝和逐项 partial-success 批量治理；冲突候选必须由 Owner 明确选择 keep-both 或 supersede。无 Session 与只读 Binding 均失败关闭。
 - 第七阶段审批策略核心：私有 runtime settings 默认 `manual`；Owner 可用 exact revision 显式切换到带 IANA 时区与 `HH:mm` 本地时间的 `scheduled-auto`，并发陈旧更新失败关闭。此阶段尚未启动调度器或自动审批。
 - 第八阶段策略 RPC：Memory-owned settings Manager 与 loopback Settings Host 通过 live Session/Active Space receipt 暴露策略读取和 exact-revision 更新；browser client 不能提交 Owner、Workspace 或 settings path。
-- 第九阶段策略 UI：Settings tab 可显式选择 `manual` 或带 IANA 时区和本地时间的 `scheduled-auto`，并用已观察到的 exact revision 保存；只读 Active Space Binding 在 UI 与 Host 两层都失败关闭。此阶段仍不启动调度副作用。
+- 第九阶段策略 UI：Settings tab 可显式选择 `manual` 或带 IANA 时区和本地时间的 `scheduled-auto`，并用已观察到的 exact revision 保存；只读 Active Space Binding 在 UI 与 Host 两层都失败关闭。
+- 第十阶段到期计算：纯 `MemoryApprovalScheduleV1` Module 给出最近已到期和下一当地日期槽位；DST 缺失时间顺延到第一个有效时刻，重复时间取第一次。此阶段仍不启动调度副作用。
 - npm 发布边界：内部 workspace 包继续私有；唯一安装包 `@mistymoon/dsh-mmem` 聚合 Memory、本地 principal Adapter、Settings Host 和 Settings UI，并声明官方 DSH bundle patch。
 
 ## 目录
@@ -65,7 +66,7 @@ pnpm pack:npm
 ## 下一步
 
 1. 用统一 `GovernedMemoryV1` Interface 深化 Archive/governance/recall Module。
-2. 实现 timezone-aware due calculation、本机调度生命周期、单实例 lease 与逐日 receipt；UI 不复制策略校验或治理业务规则。
+2. 把 timezone-aware due calculation 接入本机调度生命周期、单实例 lease 与逐日 receipt；UI 不复制策略校验或治理业务规则。
 3. 先发布默认人工审批的独立 MVP，再实现 `scheduled-auto`。
 4. 提供旧 `mistymoon/memory` 到新独立目录的只读 plan、exact digest、备份、Owner confirm、apply 与 rollback rehearsal。
 5. 在已完成的 Catalog、物理隔离、Runtime 路由和 Space-aware Settings governance 上，分阶段实现非传递的有限共享和显式 Federation。

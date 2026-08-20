@@ -114,6 +114,7 @@ export * from './space-archive-router.js'
 export * from './space-governance.js'
 export * from './principal.js'
 export * from './approval-policy.js'
+export * from './approval-schedule.js'
 
 /** Cordis plugin name and durable user-message source id. */
 export const name = 'mistymoon-memory'

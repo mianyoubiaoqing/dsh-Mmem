@@ -36,6 +36,8 @@ The loopback Settings RPC client exposes the operations used by the dedicated Me
 
 Private runtime settings now carry a versioned approval policy. Missing or legacy policy fields resolve to revision-zero `manual`; `scheduled-auto` can be persisted only with an explicit IANA time zone, 24-hour local time, and the exact previously observed revision. Updates take a cross-process lease, so concurrent writers cannot both commit from the same revision. Policy persistence alone never starts an approval run; the local scheduler remains a follow-up Module.
 
+The pure `MemoryApprovalScheduleV1` Module derives the latest due slot and next slot from an immutable policy revision and current instant. Daily identity uses the Owner's local calendar date. A local time skipped by a daylight-saving transition runs at the first valid instant after the gap; a repeated local time uses its first occurrence. The Module starts no timers and reads no runtime or Archive state.
+
 The Memory-owned runtime-settings Manager is exposed to the loopback Settings Host only after a live DSH Session resolves an Active Space. The browser client can read the current policy and submit only its expected revision, mode, time zone, and local time; Owner identity, Workspace evidence, settings paths, and policy revisions chosen by the browser never enter the trusted context. Policy updates additionally require a read-write Active Space Binding. The Settings tab now exposes that policy editor, while the scheduler remains a follow-up Module and persistence alone never starts a background run.
 
 Current limitations:

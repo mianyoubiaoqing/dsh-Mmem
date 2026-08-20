@@ -62,6 +62,7 @@ function assertPackedFiles(files) {
     'README.md',
     'cordis.patch.yml',
     'lib/memory/index.js',
+    'lib/memory/approval-schedule.js',
     'lib/memory/principal.js',
     'lib/memory/principal-local.js',
     'lib/memory/settings-host.js',
@@ -155,6 +156,7 @@ try {
       '--eval',
       `for (const specifier of [
         '${expectedName}',
+        '${expectedName}/approval-schedule',
         '${expectedName}/principal',
         '${expectedName}/principal-local',
         '${expectedName}/settings-host',
@@ -162,11 +164,13 @@ try {
         '${expectedName}/settings-ui',
         '${expectedName}/settings-ui/client',
       ]) import.meta.resolve(specifier);
-      const [principal, client, ui] = await Promise.all([
+      const [schedule, principal, client, ui] = await Promise.all([
+        import('${expectedName}/approval-schedule'),
         import('${expectedName}/principal-local'),
         import('${expectedName}/settings-client'),
         import('${expectedName}/settings-ui'),
       ]);
+      if (typeof schedule.calculateMemoryApprovalScheduleV1 !== 'function') throw new Error('invalid approval schedule entry');
       if (principal.name !== 'dsh-mmem-principal-local') throw new Error('invalid principal Adapter entry');
       if (typeof client.createMemorySettingsClient !== 'function') throw new Error('invalid Settings client entry');
       if (ui.name !== 'dsh-mmem-settings-ui') throw new Error('invalid Settings UI entry');`,
