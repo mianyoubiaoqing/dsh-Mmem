@@ -30,7 +30,7 @@ if (typeof settingsClient.createMemorySettingsClient !== 'function') {
 if (settingsUi.name !== 'dsh-mmem-settings-ui') {
   throw new Error(`unexpected Memory Settings UI plugin name: ${String(settingsUi.name)}`)
 }
-if (!settingsUiClient.includes("id: \"@mistymoon/dsh-memory-settings-ui\"")) {
+if (!settingsUiClient.includes("id: \"@mistymoon/dsh-mmem/settings-ui\"")) {
   throw new Error('built Memory Settings UI client is missing its DSH module-loader id')
 }
 

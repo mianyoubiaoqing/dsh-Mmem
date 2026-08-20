@@ -17,6 +17,7 @@
 - 第四阶段 Memory-owned Host：独立 `@mistymoon/dsh-memory/settings-host` 在 loopback-only RPC channel 上接受 live DSH `sessionId`，由 Host 取得不可变 `SessionHeader`；已支持 Active Space Candidate 的列出、人工批准/拒绝、搜索、来源、冲突评估、编辑、合并和批量治理，浏览器不能提交 `ownerId` 或 `cwd`。
 - 第五阶段 Browser RPC client：独立 `@mistymoon/dsh-memory/settings-client` 固定连接 Memory-owned channel，只从 DSH UI 接受 live `sessionId` 与可选已绑定 Space；它校验所有 Host 响应，并为审批、编辑、合并和批量操作生成幂等 request ID。
 - 第六阶段 Settings tab MVP：独立 `@mistymoon/dsh-memory-settings-ui` 从 DSH 公共 Session list 读取当前 live Session，展示 exact Active Space，在读写 Binding 中提供人工批准/拒绝；冲突候选必须由 Owner 明确选择 keep-both 或 supersede。无 Session 与只读 Binding 均失败关闭。
+- npm 发布边界：内部 workspace 包继续私有；唯一安装包 `@mistymoon/dsh-mmem` 聚合 Memory、临时 identity Adapter、Settings Host 和 Settings UI，并声明官方 DSH bundle patch。
 
 ## 目录
 
@@ -26,7 +27,8 @@ dsh-Mmem/
 ├─ packages/
 │  ├─ memory/       当前 Memory implementation 迁移基线
 │  ├─ identity/     临时 Owner Eligibility 兼容实现
-│  └─ settings-ui/  Session-bound DSH Settings tab 与 browser bundle
+│  ├─ settings-ui/  Session-bound DSH Settings tab 与 browser bundle
+│  └─ bundle/       唯一可发布的 `@mistymoon/dsh-mmem` npm 包
 ├─ scripts/         maintenance 与旧数据 migration CLI
 ├─ cordis.patch.yml 开发组合草案
 └─ AGENTS.md
@@ -43,14 +45,20 @@ Memory Space、Scope、Binding 与共享术语以 `CONTEXT.md` 为准。DSH 是 
 
 ## 开发
 
-环境基线：Node.js `^22.19.0 || >=24.0.0`、pnpm `11.7.0`、DSH `0.1.0-rc.7`。
+环境基线：Node.js `^22.19.0 || >=24.0.0`、pnpm `11.7.0`、DSH `0.1.0-rc.8`。公开 peer range 同时保留已验证的 `rc.7`。
 
 ```powershell
 pnpm install
 pnpm check
 ```
 
-当前 `cordis.patch.yml` 是开发组合草案：它仍同时加载临时 identity、Memory、Settings Host 与 Settings UI workspace 包。公开安装前必须完成单包 bundle/exports、clean-profile UI smoke 和发布审计。
+`cordis.patch.yml` 与公开包中的 bundle patch 都只引用 `@mistymoon/dsh-mmem` 及其子入口。运行以下命令会构建、审计、执行临时 clean install，并把唯一可上传的 tarball 留在 `.artifacts/npm/`：
+
+```powershell
+pnpm pack:npm
+```
+
+该命令不会登录或发布 npm。最终 `npm publish <tgz> --access public`、dist-tag 和版本选择只由 Owner 手动执行。当前仍需在公开发布前完成 clean DSH Profile UI smoke、许可证复核与发行验收。
 
 ## 下一步
 

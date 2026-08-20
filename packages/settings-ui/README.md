@@ -1,6 +1,6 @@
-# `@mistymoon/dsh-memory-settings-ui`
+# dsh-Mmem Settings UI workspace
 
-This package contributes the standalone dsh-Mmem page to DSH's `settings.plugins.tab` slot. It reads the current Session only through DSH's public Session-list hook, then creates a Session-bound `@mistymoon/dsh-memory/settings-client` caller. The page never accepts Owner identity, `cwd`, an arbitrary Workspace, or Archive paths.
+This private workspace package contributes the standalone dsh-Mmem page to DSH's `settings.plugins.tab` slot. Its built Host and browser entries ship through `@mistymoon/dsh-mmem/settings-ui` in the single public npm bundle. It reads the current Session only through DSH's public Session-list hook, then creates a Session-bound Memory Settings caller. The page never accepts Owner identity, `cwd`, an arbitrary Workspace, or Archive paths.
 
 The current MVP displays the exact Active Memory Space and Binding access, lists pending Candidates, supports manual approval and rejection, and requires an explicit keep-both or supersede choice for blocking duplicate/conflict assessments. A missing current Session fails closed, and a read-only Binding disables all writes.
 
