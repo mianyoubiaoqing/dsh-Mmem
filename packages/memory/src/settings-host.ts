@@ -455,6 +455,9 @@ export function apply(ctx: Context): void {
             : { requestedSpaceId: selection.requestedSpaceId }),
         })
         if (endpoint === 'settings/get' || approvalUpdate !== undefined) {
+          if (approvalUpdate !== undefined && governance.access !== 'read-write') {
+            return badRequest('Memory approval policy updates require a read-write Active Space Binding.')
+          }
           const settings = approvalUpdate === undefined
             ? await ctx.dshMmemRuntimeSettings.get()
             : await ctx.dshMmemRuntimeSettings.updateApproval(approvalUpdate.update)
