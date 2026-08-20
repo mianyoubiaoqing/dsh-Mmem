@@ -3,6 +3,7 @@
  * @module @mistymoon/dsh-memory/legacy-migration
  */
 
+import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type {
@@ -38,11 +39,24 @@ export interface LegacyMemoryMigrationResult extends LegacyMemoryPreview {
   duplicateMemories: number
 }
 
-interface LegacyMemoryRow {
+/** @internal Canonical eligible source row used by the standalone migration transaction. */
+export interface LegacyMemoryRow {
   id: string
   created_at: string
   content: string
   visibility: string
+}
+
+/** @internal Exact source rows already captured by a digest-checked migration plan. */
+export interface LegacyMemoryRowImportOptions extends Omit<LegacyMemoryMigrationOptions, 'sourcePath'> {
+  rows: readonly LegacyMemoryRow[]
+}
+
+/** @internal One read transaction over legacy source facts and their logical digest. */
+export interface LegacyMemorySourceSnapshot {
+  preview: LegacyMemoryPreview
+  sourceDigest: string
+  rows: readonly LegacyMemoryRow[]
 }
 
 const COMPATIBLE_COLUMNS = new Set([
@@ -79,13 +93,18 @@ function count(database: DatabaseSync, where = ''): number {
  * @returns Compatibility and eligible-row counts; no data is copied.
  */
 export function previewLegacyMemoryDatabase(sourcePath: string): LegacyMemoryPreview {
+  return inspectLegacyMemorySource(sourcePath).preview
+}
+
+/** Read and hash the exact ordered confirmed-row projection without mutating the SQLite source. */
+export function inspectLegacyMemorySource(sourcePath: string): LegacyMemorySourceSnapshot {
   const path = resolve(sourcePath)
   const database = new DatabaseSync(path, { readOnly: true })
   try {
     const columns = hasTable(database, 'memories') ? tableColumns(database, 'memories') : new Set<string>()
     const compatible = [...COMPATIBLE_COLUMNS].every(column => columns.has(column))
     if (!compatible) {
-      return {
+      const preview = {
         sourcePath: path,
         compatible: false,
         totalMemories: 0,
@@ -93,10 +112,15 @@ export function previewLegacyMemoryDatabase(sourcePath: string): LegacyMemoryPre
         skippedMemories: 0,
         warnings: ['The database does not contain a compatible legacy memories table.', ...WARNINGS],
       }
+      return {
+        preview,
+        sourceDigest: createHash('sha256').update('incompatible').digest('hex'),
+        rows: [],
+      }
     }
     const totalMemories = count(database)
     const eligibleMemories = count(database, ' WHERE status = \'confirmed\'')
-    return {
+    const preview = {
       sourcePath: path,
       compatible: true,
       totalMemories,
@@ -104,6 +128,14 @@ export function previewLegacyMemoryDatabase(sourcePath: string): LegacyMemoryPre
       skippedMemories: totalMemories - eligibleMemories,
       warnings: [...WARNINGS],
     }
+    const rows = database.prepare(`
+      SELECT id, created_at, content, visibility
+      FROM memories
+      WHERE status = 'confirmed'
+      ORDER BY created_at ASC, id ASC
+    `).all() as unknown as LegacyMemoryRow[]
+    const sourceDigest = createHash('sha256').update(JSON.stringify(rows)).digest('hex')
+    return { preview, sourceDigest, rows }
   } finally {
     database.close()
   }
@@ -111,6 +143,27 @@ export function previewLegacyMemoryDatabase(sourcePath: string): LegacyMemoryPre
 
 function importedVisibility(value: string): MemoryVisibility {
   return value === 'confidential' || value === 'owner_only' ? 'confidential' : 'personal'
+}
+
+/** Import one already-snapshotted ordered row projection into an Archive. */
+export async function importLegacyMemoryRows(
+  options: LegacyMemoryRowImportOptions,
+): Promise<{ importedMemories: number; duplicateMemories: number }> {
+  let importedMemories = 0
+  let duplicateMemories = 0
+  for (const row of options.rows) {
+    const result = await options.archive.importConfirmed({
+      context: options.context,
+      memoryKind: options.memoryKind,
+      sourceMessageId: `legacy-mistymoon:${row.id}`,
+      content: row.content,
+      createdAt: row.created_at,
+      visibility: importedVisibility(row.visibility),
+    })
+    if (result.imported) importedMemories += 1
+    else duplicateMemories += 1
+  }
+  return { importedMemories, duplicateMemories }
 }
 
 /**
@@ -123,32 +176,14 @@ function importedVisibility(value: string): MemoryVisibility {
 export async function migrateLegacyMemoryDatabase(
   options: LegacyMemoryMigrationOptions,
 ): Promise<LegacyMemoryMigrationResult> {
-  const preview = previewLegacyMemoryDatabase(options.sourcePath)
+  const snapshot = inspectLegacyMemorySource(options.sourcePath)
+  const preview = snapshot.preview
   if (!preview.compatible) throw new Error('legacy MistyMoon database does not contain a compatible memories table')
-  const database = new DatabaseSync(preview.sourcePath, { readOnly: true })
-  let importedMemories = 0
-  let duplicateMemories = 0
-  try {
-    const rows = database.prepare(`
-      SELECT id, created_at, content, visibility
-      FROM memories
-      WHERE status = 'confirmed'
-      ORDER BY created_at ASC, id ASC
-    `).all() as unknown as LegacyMemoryRow[]
-    for (const row of rows) {
-      const result = await options.archive.importConfirmed({
-        context: options.context,
-        memoryKind: options.memoryKind,
-        sourceMessageId: `legacy-mistymoon:${row.id}`,
-        content: row.content,
-        createdAt: row.created_at,
-        visibility: importedVisibility(row.visibility),
-      })
-      if (result.imported) importedMemories += 1
-      else duplicateMemories += 1
-    }
-  } finally {
-    database.close()
-  }
+  const { importedMemories, duplicateMemories } = await importLegacyMemoryRows({
+    rows: snapshot.rows,
+    archive: options.archive,
+    context: options.context,
+    memoryKind: options.memoryKind,
+  })
   return { ...preview, importedMemories, duplicateMemories }
 }

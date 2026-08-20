@@ -95,6 +95,10 @@
       "types": "./lib/memory/approval-review-dsh.d.ts",
       "default": "./lib/memory/approval-review-dsh.js"
     },
+    "./standalone-migration": {
+      "types": "./lib/memory/standalone-migration.d.ts",
+      "default": "./lib/memory/standalone-migration.js"
+    },
     "./settings-ui": {
       "types": "./lib/settings-ui/index.d.ts",
       "default": "./lib/settings-ui/index.js"

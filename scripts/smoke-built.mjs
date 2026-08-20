@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
 
-const [approvalSchedule, principalLocal, memory, settingsHost, settingsClient, settingsUi, settingsUiClient] = await Promise.all([
+const [approvalSchedule, standaloneMigration, principalLocal, memory, settingsHost, settingsClient, settingsUi, settingsUiClient] = await Promise.all([
   import('../packages/memory/lib/approval-schedule.js'),
+  import('../packages/memory/lib/standalone-migration.js'),
   import('../packages/memory/lib/principal-local.js'),
   import('../packages/memory/lib/index.js'),
   import('../packages/memory/lib/settings-host.js'),
@@ -33,6 +34,9 @@ if (typeof memory.createGovernedMemoryScheduledApprovalRunnerV1 !== 'function') 
 }
 if (typeof memory.createDshAgentApprovalReviewSessionDriverV1 !== 'function') {
   throw new Error('built memory plugin is missing createDshAgentApprovalReviewSessionDriverV1')
+}
+if (typeof standaloneMigration.planStandaloneMemoryMigrationV1 !== 'function') {
+  throw new Error('built memory plugin is missing planStandaloneMemoryMigrationV1')
 }
 if (settingsHost.name !== 'dsh-mmem-settings-host') {
   throw new Error(`unexpected Memory Settings Host plugin name: ${String(settingsHost.name)}`)

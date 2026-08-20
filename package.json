@@ -17,6 +17,7 @@
     "smoke:packed": "node scripts/smoke-packed.mjs",
     "audit:publication": "pnpm run smoke:packed",
     "pack:npm": "pnpm run build && node scripts/smoke-packed.mjs --output .artifacts/npm",
+    "migrate:standalone": "tsx scripts/migrate-memory.ts",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build && pnpm run smoke:built && pnpm run smoke:packed"
   },
   "devDependencies": {
