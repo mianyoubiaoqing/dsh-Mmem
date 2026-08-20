@@ -250,6 +250,33 @@ describe('dsh-Mmem Settings Host RPC', () => {
         }),
       },
     })
+    const resolvedCandidate = await active.propose({
+      context: PERSONAL_COMPANION_ACCESS,
+      sourceMessageId: 'message-settings-host-candidate-resolution',
+      content: '设置页显示这个中性候选。',
+      visibility: 'personal',
+      memoryKind: 'summary',
+    })
+    await expect(registration.handler('candidates/approve', {
+      sessionId: String(session.id),
+      candidateId: resolvedCandidate.id,
+      requestId: 'settings-approve-resolution-1',
+      resolution: { kind: 'keep-both' },
+    }, new AbortController().signal)).resolves.toEqual({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: space.id,
+          access: 'read-write',
+          bindingRevision: binding.revision,
+        },
+        memory: expect.objectContaining({
+          sourceCandidateId: resolvedCandidate.id,
+          status: 'confirmed',
+        }),
+      },
+    })
     const editResult = await registration.handler('memory/edit', {
       sessionId: String(session.id),
       requestId: 'settings-edit-1',

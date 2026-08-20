@@ -66,6 +66,10 @@
     "./settings-host": {
       "types": "./lib/settings-host.d.ts",
       "default": "./lib/settings-host.js"
+    },
+    "./settings-client": {
+      "types": "./lib/settings-client.d.ts",
+      "default": "./lib/settings-client.js"
     }
   },
   "scripts": {

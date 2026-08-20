@@ -1,7 +1,8 @@
-const [identity, memory, settingsHost] = await Promise.all([
+const [identity, memory, settingsHost, settingsClient] = await Promise.all([
   import('../packages/identity/lib/index.js'),
   import('../packages/memory/lib/index.js'),
   import('../packages/memory/lib/settings-host.js'),
+  import('../packages/memory/lib/settings-client.js'),
 ])
 
 if (identity.name !== 'mistymoon-identity') {
@@ -18,6 +19,9 @@ if (typeof memory.openMemorySpaceArchiveRouter !== 'function') {
 }
 if (settingsHost.name !== 'dsh-mmem-settings-host') {
   throw new Error(`unexpected Memory Settings Host plugin name: ${String(settingsHost.name)}`)
+}
+if (typeof settingsClient.createMemorySettingsClient !== 'function') {
+  throw new Error('built Memory package is missing createMemorySettingsClient')
 }
 
 console.log('dsh-Mmem built plugin smoke passed')

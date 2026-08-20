@@ -1,6 +1,6 @@
 # `@mistymoon/dsh-memory`
 
-> Standalone migration status: the package exports `MemorySpaceCatalogV1` and `MemorySpaceArchiveRouterV1`. It binds Owner-governed Memory Spaces only to exact `cwd` evidence supplied by DSH `SessionHeader`, gives every Space a physically separate Archive, and routes DSH pre-step, tools, and candidate extraction through the Session's Active Space. Cross-space recall and Space-aware Settings governance are not enabled yet.
+> Standalone migration status: the package exports `MemorySpaceCatalogV1`, `MemorySpaceArchiveRouterV1`, a loopback-only Settings Host, and a Session-bound browser RPC client. It binds Owner-governed Memory Spaces only to exact `cwd` evidence supplied by DSH `SessionHeader`, gives every Space a physically separate Archive, and routes DSH pre-step, tools, candidate extraction, and Settings governance through the Session's Active Space. Cross-space recall and the actual DSH Settings tab are not enabled yet.
 
 This plugin owns MistyMoon's private cross-session companion memory. Every public archive operation requires a host-constructed `MemoryAccessContextV1`; model tool arguments cannot choose Owner, authority, scope, or disclosure policy. New candidates and records use domain schema v2 and reference an immutable Observation committed in the same storage transaction. They retain exact Owner/scope, memory kind, recorded time, optional validity bounds, visibility, source, and append-only revision state.
 
@@ -32,7 +32,7 @@ Pending candidates can be assessed against active records through a deterministi
 
 Candidate edits and merges are append-only governance operations. They create a new pending candidate with complete `sourceCandidateIds` lineage and supersede the source candidates in the same transaction. A payload-free audit projection reports only action, IDs, source request, and time; it never includes candidate content, visibility, or Provider receipts.
 
-The loopback Settings client includes a dedicated Memory management tab backed only by the context-free governance facade. Search and filters run after Archive scope/confidential gates; source views expose identifiers and lineage rather than original DSH message content. Batch review reports one outcome per independently atomic candidate decision, so partial success is explicit and safely retryable.
+The loopback Settings RPC client exposes the operations needed by a future dedicated Memory management tab and is backed only by the context-free governance facade. It accepts a live DSH Session ID and an optional already-bound Space, never Owner or Workspace identity, and validates Host responses before exposing them to UI code. Search and filters run after Archive scope/confidential gates; source views expose identifiers and lineage rather than original DSH message content. Batch review reports one outcome per independently atomic candidate decision, so partial success is explicit and safely retryable. The actual DSH Settings tab is not mounted yet.
 
 Current limitations:
 

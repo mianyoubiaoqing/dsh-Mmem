@@ -153,11 +153,16 @@ function candidateDecision(value: unknown): {
   requestedSpaceId?: string
   candidateId: string
   requestId: string
+  resolution?: MemoryBatchDecisionV1['resolution']
 } | undefined {
   const input = value as Record<string, unknown>
-  const keys = input?.requestedSpaceId === undefined
-    ? ['candidateId', 'requestId', 'sessionId']
-    : ['candidateId', 'requestId', 'requestedSpaceId', 'sessionId']
+  const keys = [
+    'candidateId',
+    'requestId',
+    ...(input?.requestedSpaceId === undefined ? [] : ['requestedSpaceId']),
+    ...(input?.resolution === undefined ? [] : ['resolution']),
+    'sessionId',
+  ]
   if (!exactObject(value, keys)
     || typeof value.sessionId !== 'string' || value.sessionId.trim() === ''
     || typeof value.candidateId !== 'string' || value.candidateId.trim() === ''
@@ -166,10 +171,21 @@ function candidateDecision(value: unknown): {
       && (typeof value.requestedSpaceId !== 'string' || value.requestedSpaceId.trim() === ''))) {
     return undefined
   }
+  let resolution: MemoryBatchDecisionV1['resolution']
+  if (value.resolution !== undefined) {
+    if (exactObject(value.resolution, ['kind']) && value.resolution.kind === 'keep-both') {
+      resolution = { kind: 'keep-both' }
+    } else if (exactObject(value.resolution, ['kind', 'memoryId'])
+      && value.resolution.kind === 'supersede'
+      && typeof value.resolution.memoryId === 'string' && value.resolution.memoryId.trim() !== '') {
+      resolution = { kind: 'supersede', memoryId: value.resolution.memoryId }
+    } else return undefined
+  }
   return {
     sessionId: SessionId(value.sessionId),
     candidateId: value.candidateId,
     requestId: value.requestId,
+    ...(resolution === undefined ? {} : { resolution }),
     ...(value.requestedSpaceId === undefined ? {} : { requestedSpaceId: value.requestedSpaceId }),
   }
 }
@@ -411,6 +427,9 @@ export function apply(ctx: Context): void {
         if (endpoint === 'memory/batch') return badRequest('Memory batch governance request is invalid.')
         return badRequest('Candidate decision requires sessionId, candidateId, requestId, and an optional requestedSpaceId.')
       }
+      if (endpoint === 'candidates/reject' && decision?.resolution !== undefined) {
+        return badRequest('Candidate rejection does not accept a conflict resolution.')
+      }
       const session = ctx.sessions.get(selection.sessionId)
       if (session === undefined) {
         return {
@@ -495,6 +514,7 @@ export function apply(ctx: Context): void {
             memory: await governance.approveCandidate({
               candidateId: decision.candidateId,
               sourceMessageId: `dsh-mmem-settings:${decision.requestId}`,
+              ...(decision.resolution === undefined ? {} : { resolution: decision.resolution }),
             }),
           }
           return { ok: true, value }
