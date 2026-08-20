@@ -67,9 +67,13 @@
       "types": "./lib/memory/settings-client.d.ts",
       "default": "./lib/memory/settings-client.js"
     },
-    "./identity-compat": {
-      "types": "./lib/identity/index.d.ts",
-      "default": "./lib/identity/index.js"
+    "./principal": {
+      "types": "./lib/memory/principal.d.ts",
+      "default": "./lib/memory/principal.js"
+    },
+    "./principal-local": {
+      "types": "./lib/memory/principal-local.d.ts",
+      "default": "./lib/memory/principal-local.js"
     },
     "./settings-ui": {
       "types": "./lib/settings-ui/index.d.ts",

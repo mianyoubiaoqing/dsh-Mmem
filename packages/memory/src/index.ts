@@ -95,6 +95,7 @@ import {
   createMemorySpaceGovernanceResolver,
   type MemorySpaceGovernanceResolverV1,
 } from './space-governance.js'
+import type { MemoryPrincipalResolverV1, MemoryPrincipalV1 } from './principal.js'
 
 export * from './contracts.js'
 export * from './candidate-extraction.js'
@@ -107,12 +108,13 @@ export * from './runtime-settings.js'
 export * from './space-catalog.js'
 export * from './space-archive-router.js'
 export * from './space-governance.js'
+export * from './principal.js'
 
 /** Cordis plugin name and durable user-message source id. */
 export const name = 'mistymoon-memory'
 
 /** Agent pre-step waterfall used for durable memory projection. */
-export const inject = ['agents', 'tools', 'mistymoonOwnerEligibility']
+export const inject = ['agents', 'tools', 'dshMmemPrincipalResolver']
 
 /** Memory plugin configuration. */
 export interface Config {
@@ -1358,23 +1360,10 @@ function boundedListLimit(limit: number | undefined): number {
   return resolved
 }
 
-interface MemoryOwnerEligibility {
-  ownerMessages(agent: Agent, messages: readonly UserMessage[]): readonly UserMessage[]
-  evaluateMessage(agent: Agent, message: UserMessage): {
-    readonly eligible: boolean
-    readonly ownerId?: string
-    readonly authority?: string
-  }
-  evaluateCurrentTurn(agent: Agent): {
-    readonly eligible: boolean
-    readonly ownerId?: string
-    readonly authority?: string
-  }
-  trustedLocalOwner?(): { readonly ownerId: string; readonly authority: string }
-}
-
-function ownerEligibility(ctx: Context): MemoryOwnerEligibility {
-  return ctx.get('mistymoonOwnerEligibility', true) as MemoryOwnerEligibility
+function principalResolver(ctx: Context): MemoryPrincipalResolverV1 {
+  const resolver = ctx.get('dshMmemPrincipalResolver', true)
+  if (resolver === undefined) throw new Error('dsh-Mmem requires a Memory principal resolver')
+  return resolver
 }
 
 const MEMORY_TOOL_NAMES = new Set([
@@ -1391,10 +1380,10 @@ const MEMORY_TOOL_NAMES = new Set([
 function memoryOwnerGuard(ctx: Context, execution: Readonly<ToolExecution>): string | undefined {
   if (!MEMORY_TOOL_NAMES.has(execution.name)) return undefined
   const agent = execution.agent
-  if (agent !== undefined && ownerEligibility(ctx).evaluateCurrentTurn(agent).eligible) {
+  if (agent !== undefined && principalResolver(ctx).currentTurn(agent) !== undefined) {
     return undefined
   }
-  return 'MistyMoon memory tools require an authenticated Owner request in the active top-level turn.'
+  return 'dsh-Mmem tools require an authenticated Owner request in the active top-level turn.'
 }
 
 const COMPANION_SCOPE = { version: 1, kind: 'companion-reality' } as const
@@ -1415,7 +1404,11 @@ function currentTurnText(agent: Agent): string {
   return events.slice(start).flatMap(event => event.type === 'user/message' ? [userText(event.data)] : []).join('\n')
 }
 
-function currentTurnOwnerMessages(agent: Agent, turn: number, eligibility: MemoryOwnerEligibility): UserMessage[] {
+function currentTurnOwnerMessages(
+  agent: Agent,
+  turn: number,
+  resolver: MemoryPrincipalResolverV1,
+): UserMessage[] {
   const events = agent.session.events
   let start = -1
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -1429,7 +1422,7 @@ function currentTurnOwnerMessages(agent: Agent, turn: number, eligibility: Memor
   const messages = events.slice(start)
     .filter(event => event.type === 'user/message')
     .map(event => event.data)
-  return [...eligibility.ownerMessages(agent, messages)]
+  return messages.filter(message => resolver.message(agent, message) !== undefined)
 }
 
 function turnHasCompletedReply(agent: Agent, turn: number): boolean {
@@ -1439,17 +1432,17 @@ function turnHasCompletedReply(agent: Agent, turn: number): boolean {
 }
 
 function ownerContext(
-  decision: ReturnType<MemoryOwnerEligibility['evaluateCurrentTurn']>,
+  principal: MemoryPrincipalV1 | undefined,
   channelDisclosure: MemoryAccessContextV1['channelDisclosure'],
   text: string,
 ): MemoryAccessContextV1 {
-  if (!decision.eligible || decision.ownerId === undefined || decision.authority === undefined) {
+  if (principal === undefined) {
     throw new Error('memory access requires an authenticated Owner decision')
   }
   return {
     version: 1,
-    ownerId: decision.ownerId,
-    authority: decision.authority,
+    ownerId: principal.ownerId,
+    authority: principal.authority,
     scope: COMPANION_SCOPE,
     channelDisclosure,
     requestIntent: explicitConfidentialRecallIntent(text) ? 'explicit-confidential-recall' : 'ordinary',
@@ -1463,7 +1456,7 @@ function toolContext(
 ): MemoryAccessContextV1 {
   const agent = execution.agent
   if (agent === undefined) throw new Error('memory tool requires an active Owner agent')
-  return ownerContext(ownerEligibility(ctx).evaluateCurrentTurn(agent), channelDisclosure, currentTurnText(agent))
+  return ownerContext(principalResolver(ctx).currentTurn(agent), channelDisclosure, currentTurnText(agent))
 }
 
 type MemoryArchiveOperations = Omit<CompanionMemoryArchive, 'dispose'>
@@ -1780,20 +1773,24 @@ function registerMemoryTools(
 }
 
 function memoryGovernanceService(
-  eligibility: MemoryOwnerEligibility,
+  resolver: MemoryPrincipalResolverV1,
   archive: CompanionMemoryArchive,
 ): MemoryGovernanceService {
-  const identity = eligibility.trustedLocalOwner?.()
-  if (identity === undefined) throw new Error('memory governance requires a trusted local Owner adapter')
+  return createMemoryGovernanceService(trustedGovernanceContext(resolver), archive)
+}
+
+function trustedGovernanceContext(resolver: MemoryPrincipalResolverV1): MemoryAccessContextV1 {
+  const principal = resolver.trustedLocal()
+  if (principal === undefined) throw new Error('memory governance requires a trusted local principal Adapter')
   const context: MemoryAccessContextV1 = {
     version: 1,
-    ownerId: identity.ownerId,
-    authority: identity.authority,
+    ownerId: principal.ownerId,
+    authority: principal.authority,
     scope: COMPANION_SCOPE,
     channelDisclosure: 'owner-confidential',
     requestIntent: 'explicit-confidential-recall',
   }
-  return createMemoryGovernanceService(context, archive)
+  return context
 }
 
 /**
@@ -1853,17 +1850,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   if (catalog !== undefined && router !== undefined) {
     ctx.effect(() => ctx.provide('dshMmemSpaceCatalog', catalog), 'dsh-mmem: Memory Space Catalog')
     ctx.effect(() => ctx.provide('dshMmemSpaceRouter', router), 'dsh-mmem: Space Archive Router')
-    const eligibility = ownerEligibility(ctx)
-    const identity = eligibility.trustedLocalOwner?.()
-    if (identity === undefined) throw new Error('memory governance requires a trusted local Owner adapter')
-    const governanceContext: MemoryAccessContextV1 = {
-      version: 1,
-      ownerId: identity.ownerId,
-      authority: identity.authority,
-      scope: COMPANION_SCOPE,
-      channelDisclosure: 'owner-confidential',
-      requestIntent: 'explicit-confidential-recall',
-    }
+    const governanceContext = trustedGovernanceContext(principalResolver(ctx))
     ctx.effect(
       () => ctx.provide(
         'dshMmemSpaceGovernance',
@@ -1886,7 +1873,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   )
   if (archive !== undefined) {
     ctx.effect(
-      () => ctx.provide('mistymoonMemoryGovernance', memoryGovernanceService(ownerEligibility(ctx), archive)),
+      () => ctx.provide('mistymoonMemoryGovernance', memoryGovernanceService(principalResolver(ctx), archive)),
       'mistymoon-memory: loopback governance facade',
     )
     ctx.effect(() => () => archive.dispose(), 'mistymoon-memory: bounded archive disposal')
@@ -1918,13 +1905,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.on('agent/pre-step', async ({ agent }, next): Promise<PreStepDecision> => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
-    const ownerMessages = ownerEligibility(ctx).ownerMessages(agent, decision.messages)
+    const resolver = principalResolver(ctx)
+    const ownerMessages = decision.messages.filter(message => resolver.message(agent, message) !== undefined)
     try {
       if (archive !== undefined && archive.inspection().state !== 'ready') return decision
       const firstOwnerMessage = ownerMessages[0]
       if (firstOwnerMessage === undefined) return decision
       const firstContext = ownerContext(
-        ownerEligibility(ctx).evaluateMessage(agent, firstOwnerMessage),
+        resolver.message(agent, firstOwnerMessage),
         channelDisclosure,
         userText(firstOwnerMessage),
       )
@@ -1939,7 +1927,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         const text = userText(message)
         if (text !== '' && (!('access' in activeMemory) || activeMemory.access === 'read-write')) {
           await activeMemory.observeExplicit({
-            context: ownerContext(ownerEligibility(ctx).evaluateMessage(agent, message), channelDisclosure, text),
+            context: ownerContext(resolver.message(agent, message), channelDisclosure, text),
             sourceMessageId: message.id,
             text,
             memoryKind: 'summary',
@@ -1949,7 +1937,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const query = ownerMessages.map(userText).filter(Boolean).join('\n')
       if (query === '') return decision
       const context = ownerContext(
-        ownerEligibility(ctx).evaluateMessage(agent, firstOwnerMessage),
+        resolver.message(agent, firstOwnerMessage),
         channelDisclosure,
         query,
       )
@@ -1984,12 +1972,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const provider = extraction.current()
     if (provider === undefined || !turnHasCompletedReply(agent, turn)
       || (archive !== undefined && archive.inspection().state !== 'ready')) return
-    const eligibility = ownerEligibility(ctx)
-    const ownerMessages = currentTurnOwnerMessages(agent, turn, eligibility)
+    const resolver = principalResolver(ctx)
+    const ownerMessages = currentTurnOwnerMessages(agent, turn, resolver)
     for (const message of ownerMessages) {
       const text = userText(message)
       if (text === '') continue
-      const context = ownerContext(eligibility.evaluateMessage(agent, message), channelDisclosure, text)
+      const context = ownerContext(resolver.message(agent, message), channelDisclosure, text)
       const target = archive ?? await router?.resolveSession({
         ownerId: context.ownerId,
         sessionHeader: agent.session.header,

@@ -1,7 +1,6 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/identity" },
     { "path": "./packages/memory" },
     { "path": "./packages/settings-ui" }
   ]

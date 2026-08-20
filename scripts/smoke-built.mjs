@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 
-const [identity, memory, settingsHost, settingsClient, settingsUi, settingsUiClient] = await Promise.all([
-  import('../packages/identity/lib/index.js'),
+const [principalLocal, memory, settingsHost, settingsClient, settingsUi, settingsUiClient] = await Promise.all([
+  import('../packages/memory/lib/principal-local.js'),
   import('../packages/memory/lib/index.js'),
   import('../packages/memory/lib/settings-host.js'),
   import('../packages/memory/lib/settings-client.js'),
@@ -9,8 +9,8 @@ const [identity, memory, settingsHost, settingsClient, settingsUi, settingsUiCli
   readFile(new URL('../packages/settings-ui/lib/client.js', import.meta.url), 'utf8'),
 ])
 
-if (identity.name !== 'mistymoon-identity') {
-  throw new Error(`unexpected identity plugin name: ${String(identity.name)}`)
+if (principalLocal.name !== 'dsh-mmem-principal-local') {
+  throw new Error(`unexpected principal Adapter name: ${String(principalLocal.name)}`)
 }
 if (memory.name !== 'mistymoon-memory') {
   throw new Error(`unexpected memory plugin name: ${String(memory.name)}`)
