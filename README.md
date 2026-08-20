@@ -14,7 +14,7 @@
 - 第一阶段 `MemorySpaceCatalogV1`：版本化 Space、exact DSH `SessionHeader.cwd` Binding、唯一 Default Write、显式 Active Space 与跨进程 lease。
 - 第二阶段 `MemorySpaceArchiveRouterV1`：每 Space 独立 Archive、DSH pre-step/tool/candidate 路由、只读写入门与 Source Space/Binding recall receipt。
 - 第三阶段 `MemorySpaceGovernanceResolverV1`：Settings Host 只凭 DSH `SessionHeader` 解析 Active Space，Owner 由可信 loopback Adapter 固定；人工审批复用统一治理 facade，只读 Binding 失败关闭，候选不会跨 Space 混列。
-- 第四阶段首个 Host tracer：独立 `@mistymoon/dsh-memory/settings-host` 在 loopback-only RPC channel 上接受 live DSH `sessionId`，由 Host 取得不可变 `SessionHeader`，支持 Active Space Candidate 的列出、人工批准和拒绝；浏览器不能提交 `ownerId` 或 `cwd`。
+- 第四阶段 Memory-owned Host：独立 `@mistymoon/dsh-memory/settings-host` 在 loopback-only RPC channel 上接受 live DSH `sessionId`，由 Host 取得不可变 `SessionHeader`；已支持 Active Space Candidate 的列出、人工批准/拒绝、搜索、来源、冲突评估、编辑、合并和批量治理，浏览器不能提交 `ownerId` 或 `cwd`。
 
 ## 目录
 
@@ -53,7 +53,7 @@ pnpm check
 
 1. 用统一 `GovernedMemoryV1` Interface 深化 Archive/governance/recall Module。
 2. 用 `MemoryPrincipalResolver` 解除 `mistymoonOwnerEligibility` 字符串依赖。
-3. 在已完成的 Memory-owned Host tracer 上迁移 search/source/assess/edit/merge/batch endpoints，再提取独立 Settings client；所有操作只通过 `MemorySpaceGovernanceResolverV1` 审核 Active Space。
+3. 为已完成的 Memory-owned Host 提取独立 Settings client；客户端只提交 live `sessionId`、可选已绑定 Space 和受校验的治理参数，所有操作继续通过 `MemorySpaceGovernanceResolverV1` 审核 Active Space。
 4. 先发布默认人工审批的独立 MVP，再实现 `scheduled-auto`。
 5. 提供旧 `mistymoon/memory` 到新独立目录的只读 plan、exact digest、备份、Owner confirm、apply 与 rollback rehearsal。
 6. 在已完成的 Catalog、物理隔离、Runtime 路由和 Space-aware Settings governance 上，分阶段实现非传递的有限共享和显式 Federation。

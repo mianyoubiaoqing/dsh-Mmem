@@ -169,5 +169,163 @@ describe('dsh-Mmem Settings Host RPC', () => {
       query: '不应进入召回',
       limit: 5,
     })).toEqual([])
+
+    await expect(registration.handler('memory/search', {
+      sessionId: String(session.id),
+      query: '设置页',
+      memoryKind: 'summary',
+      visibility: 'personal',
+      recordStatus: 'active',
+      candidateStatus: 'all',
+      limit: 10,
+    }, new AbortController().signal)).resolves.toEqual({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: space.id,
+          access: 'read-write',
+          bindingRevision: binding.revision,
+        },
+        management: {
+          schemaVersion: 1,
+          records: [expect.objectContaining({
+            content: '设置页显示这个中性候选。',
+            status: 'confirmed',
+          })],
+          candidates: [expect.objectContaining({
+            id: candidate.id,
+            status: 'approved',
+          })],
+          audit: [],
+        },
+      },
+    })
+    await expect(registration.handler('memory/source', {
+      sessionId: String(session.id),
+      entity: 'candidate',
+      id: candidate.id,
+    }, new AbortController().signal)).resolves.toEqual({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: space.id,
+          access: 'read-write',
+          bindingRevision: binding.revision,
+        },
+        source: expect.objectContaining({
+          schemaVersion: 1,
+          entity: 'candidate',
+          id: candidate.id,
+        }),
+      },
+    })
+    const duplicateCandidate = await active.propose({
+      context: PERSONAL_COMPANION_ACCESS,
+      sourceMessageId: 'message-settings-host-candidate-3',
+      content: '设置页显示这个中性候选。',
+      visibility: 'personal',
+      memoryKind: 'summary',
+    })
+    await expect(registration.handler('memory/assess', {
+      sessionId: String(session.id),
+      candidateId: duplicateCandidate.id,
+    }, new AbortController().signal)).resolves.toEqual({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: space.id,
+          access: 'read-write',
+          bindingRevision: binding.revision,
+        },
+        assessment: expect.objectContaining({
+          schemaVersion: 1,
+          candidateId: duplicateCandidate.id,
+          relationships: [expect.objectContaining({
+            relation: 'duplicate',
+            reason: 'exact-normalized-match',
+          })],
+        }),
+      },
+    })
+    const editResult = await registration.handler('memory/edit', {
+      sessionId: String(session.id),
+      requestId: 'settings-edit-1',
+      candidateIds: [duplicateCandidate.id],
+      content: '编辑后的独立候选。',
+      visibility: 'personal',
+      memoryKind: 'summary',
+    }, new AbortController().signal)
+    expect(editResult).toEqual({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: space.id,
+          access: 'read-write',
+          bindingRevision: binding.revision,
+        },
+        candidate: expect.objectContaining({
+          content: '编辑后的独立候选。',
+          status: 'pending',
+        }),
+      },
+    })
+    const editedCandidate = active.listCandidates({ context: PERSONAL_COMPANION_ACCESS })
+      .find(item => item.content === '编辑后的独立候选。')
+    if (editedCandidate === undefined) throw new Error('expected the edited Candidate')
+    const mergePartner = await active.propose({
+      context: PERSONAL_COMPANION_ACCESS,
+      sourceMessageId: 'message-settings-host-candidate-4',
+      content: '待合并的另一个候选。',
+      visibility: 'personal',
+      memoryKind: 'summary',
+    })
+    await expect(registration.handler('memory/merge', {
+      sessionId: String(session.id),
+      requestId: 'settings-merge-1',
+      candidateIds: [editedCandidate.id, mergePartner.id],
+      content: '合并后的治理候选。',
+      visibility: 'personal',
+      memoryKind: 'summary',
+    }, new AbortController().signal)).resolves.toEqual({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: space.id,
+          access: 'read-write',
+          bindingRevision: binding.revision,
+        },
+        candidate: expect.objectContaining({
+          content: '合并后的治理候选。',
+          status: 'pending',
+        }),
+      },
+    })
+    const mergedCandidate = active.listCandidates({ context: PERSONAL_COMPANION_ACCESS })
+      .find(item => item.content === '合并后的治理候选。')
+    if (mergedCandidate === undefined) throw new Error('expected the merged Candidate')
+    await expect(registration.handler('memory/batch', {
+      sessionId: String(session.id),
+      requestId: 'settings-batch-1',
+      decisions: [{ candidateId: mergedCandidate.id, action: 'reject' }],
+    }, new AbortController().signal)).resolves.toEqual({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: space.id,
+          access: 'read-write',
+          bindingRevision: binding.revision,
+        },
+        batch: {
+          schemaVersion: 1,
+          results: [{ candidateId: mergedCandidate.id, status: 'succeeded' }],
+        },
+      },
+    })
   })
 })
