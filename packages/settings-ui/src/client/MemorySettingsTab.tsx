@@ -6,6 +6,7 @@ import {
   type MemoryAssessmentRpcSnapshotV1,
   type MemoryManagementRpcSnapshotV1,
   type MemorySettingsRpcCallerV1,
+  type MemorySourceRpcSnapshotV1,
 } from '@mistymoon/dsh-memory/settings-client'
 import type { MemoryCandidate, MemoryVisibility } from '@mistymoon/dsh-memory/contracts'
 import type { MemoryKind } from '@mistymoon/dsh-memory/domain'
@@ -68,12 +69,14 @@ function SessionMemorySettingsTab({
   const [busy, setBusy] = useState(false)
   const [refresh, setRefresh] = useState(0)
   const [conflict, setConflict] = useState<MemoryAssessmentRpcSnapshotV1['assessment']>()
+  const [sourceView, setSourceView] = useState<MemorySourceRpcSnapshotV1['source']>()
   const [filters, setFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
   const [appliedFilters, setAppliedFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
 
   useEffect(() => {
     const controller = new AbortController()
     setSnapshot(undefined)
+    setSourceView(undefined)
     setFailed(false)
     void client.search({
       ...(appliedFilters.query.trim() === '' ? {} : { query: appliedFilters.query.trim() }),
@@ -146,6 +149,22 @@ function SessionMemorySettingsTab({
     )
   }
 
+  const showSource = (entity: 'record' | 'candidate', id: string): void => {
+    if (busy) return
+    setBusy(true)
+    setFailed(false)
+    void client.source(entity, id).then(
+      result => {
+        setBusy(false)
+        setSourceView(result.source)
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
   if (failed) return <p role="alert">{t('loadError')}</p>
   if (snapshot === undefined) return <p role="status">{t('loading')}</p>
   return <section className="dsh-mmem-settings">
@@ -205,6 +224,11 @@ function SessionMemorySettingsTab({
         : snapshot.management.records.map(record => <article key={record.id}>
             <p>{record.content}</p>
             <small>{record.memoryKind} · {record.visibility} · {record.status}</small>
+            <div>
+              <button type="button" disabled={busy} onClick={() => { showSource('record', record.id) }}>
+                {t('viewSource')}
+              </button>
+            </div>
           </article>)}
     </fieldset>
     <fieldset>
@@ -214,7 +238,11 @@ function SessionMemorySettingsTab({
         : snapshot.management.candidates.map(candidate => <article key={candidate.id}>
             <p>{candidate.content}</p>
             <small>{candidate.memoryKind} · {candidate.visibility} · {candidate.status}</small>
-            {candidate.status === 'pending' ? <div>
+            <div>
+              <button type="button" disabled={busy} onClick={() => { showSource('candidate', candidate.id) }}>
+                {t('viewSource')}
+              </button>
+              {candidate.status === 'pending' ? <>
               <button
                 type="button"
                 disabled={busy || snapshot.activeSpace.access !== 'read-write'}
@@ -225,9 +253,30 @@ function SessionMemorySettingsTab({
                 disabled={busy || snapshot.activeSpace.access !== 'read-write'}
                 onClick={() => { rejectCandidate(candidate.id) }}
               >{t('reject')}</button>
-            </div> : null}
+              </> : null}
+            </div>
           </article>)}
     </fieldset>
+    {sourceView === undefined ? null : <fieldset>
+      <legend>{t('source')}</legend>
+      <p>{t('sourceEntity')}: {sourceView.entity} · {sourceView.id}</p>
+      <small>{t('observation')}: {sourceView.observation.id}</small>
+      <small>{t('sourceKind')}: {sourceView.observation.sourceKind}</small>
+      <small>{t('sourceId')}: {sourceView.observation.sourceId}</small>
+      <small>{t('observedAt')}: {sourceView.observation.observedAt}</small>
+      {sourceView.sourceCandidateId === undefined
+        ? null
+        : <small>{t('sourceCandidate')}: {sourceView.sourceCandidateId}</small>}
+      {sourceView.sourceCandidateIds === undefined
+        ? null
+        : <small>{t('sourceCandidates')}: {sourceView.sourceCandidateIds.join(', ')}</small>}
+      {sourceView.supersedesMemoryId === undefined
+        ? null
+        : <small>{t('supersedes')}: {sourceView.supersedesMemoryId}</small>}
+      {sourceView.sourceMemoryIds === undefined
+        ? null
+        : <small>{t('sourceMemories')}: {sourceView.sourceMemoryIds.join(', ')}</small>}
+    </fieldset>}
     {conflict === undefined ? null : <fieldset>
       <legend>{t('conflict')}</legend>
       {conflict.relationships.map(relationship => <div key={relationship.memoryId}>

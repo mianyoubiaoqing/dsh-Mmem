@@ -176,6 +176,88 @@ describe('dsh-Mmem Settings tab', () => {
     expect(rendered).toContain('经治理确认的中性偏好。')
   })
 
+  it('shows payload-free Candidate provenance in a read-only Binding', async () => {
+    const activeSpace = {
+      spaceId: 'space-project-alpha',
+      access: 'read' as const,
+      bindingRevision: 'binding-source',
+    }
+    const candidate = {
+      schemaVersion: 2 as const,
+      event: 'candidate' as const,
+      id: 'candidate-source-1',
+      ownerId: 'owner-fixture',
+      scope: { version: 1 as const, kind: 'companion-reality' as const },
+      observationId: 'observation-source-1',
+      memoryKind: 'summary' as const,
+      createdAt: '2026-08-21T00:00:00.000Z',
+      recordedAt: '2026-08-21T00:00:00.000Z',
+      content: '带有可审计来源的中性候选。',
+      visibility: 'personal' as const,
+      sourceMessageId: 'message-source-1',
+      status: 'pending' as const,
+    }
+    const call = vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'memory/search') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          management: { schemaVersion: 1, records: [], candidates: [candidate], audit: [] },
+        },
+      }
+      if (endpoint === 'memory/source') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          source: {
+            schemaVersion: 1,
+            entity: 'candidate' as const,
+            id: candidate.id,
+            observation: {
+              id: candidate.observationId,
+              sourceKind: 'dsh-message',
+              sourceId: candidate.sourceMessageId,
+              observedAt: candidate.recordedAt,
+            },
+            sourceCandidateIds: ['candidate-parent-1'],
+          },
+        },
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+    const source = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:viewSource'))
+    if (source === undefined) throw new Error('expected the Candidate source button')
+    await act(async () => {
+      source.props.onClick()
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenLastCalledWith(
+      '/dsh-mmem-settings',
+      'memory/source',
+      { sessionId: 'settings-session', entity: 'candidate', id: candidate.id },
+      undefined,
+    )
+    const rendered = JSON.stringify(tree?.toJSON())
+    expect(rendered).toContain('message-source-1')
+    expect(rendered).toContain('candidate-parent-1')
+  })
+
   it('renders pending Candidates from the governed management projection', async () => {
     const searchResponse = {
       ok: true,
