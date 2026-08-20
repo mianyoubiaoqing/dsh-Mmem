@@ -33,6 +33,13 @@ interface MemoryFilterStateV1 {
   candidateStatus: MemoryCandidate['status'] | 'all'
 }
 
+interface CandidateEditDraftV1 {
+  candidateId: string
+  content: string
+  memoryKind: MemoryKind
+  visibility: MemoryVisibility
+}
+
 const MEMORY_KINDS: readonly MemoryKind[] = [
   'preference',
   'biographical',
@@ -70,6 +77,7 @@ function SessionMemorySettingsTab({
   const [refresh, setRefresh] = useState(0)
   const [conflict, setConflict] = useState<MemoryAssessmentRpcSnapshotV1['assessment']>()
   const [sourceView, setSourceView] = useState<MemorySourceRpcSnapshotV1['source']>()
+  const [editDraft, setEditDraft] = useState<CandidateEditDraftV1>()
   const [filters, setFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
   const [appliedFilters, setAppliedFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
 
@@ -77,6 +85,7 @@ function SessionMemorySettingsTab({
     const controller = new AbortController()
     setSnapshot(undefined)
     setSourceView(undefined)
+    setEditDraft(undefined)
     setFailed(false)
     void client.search({
       ...(appliedFilters.query.trim() === '' ? {} : { query: appliedFilters.query.trim() }),
@@ -157,6 +166,23 @@ function SessionMemorySettingsTab({
       result => {
         setBusy(false)
         setSourceView(result.source)
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
+  const saveEdit = (): void => {
+    if (busy || editDraft === undefined) return
+    setBusy(true)
+    setFailed(false)
+    void client.editCandidate(editDraft).then(
+      () => {
+        setBusy(false)
+        setEditDraft(undefined)
+        setRefresh(value => value + 1)
       },
       () => {
         setBusy(false)
@@ -246,6 +272,18 @@ function SessionMemorySettingsTab({
               <button
                 type="button"
                 disabled={busy || snapshot.activeSpace.access !== 'read-write'}
+                onClick={() => {
+                  setEditDraft({
+                    candidateId: candidate.id,
+                    content: candidate.content,
+                    memoryKind: candidate.memoryKind,
+                    visibility: candidate.visibility,
+                  })
+                }}
+              >{t('edit')}</button>
+              <button
+                type="button"
+                disabled={busy || snapshot.activeSpace.access !== 'read-write'}
                 onClick={() => { approveCandidate(candidate.id) }}
               >{t('approve')}</button>
               <button
@@ -257,6 +295,49 @@ function SessionMemorySettingsTab({
             </div>
           </article>)}
     </fieldset>
+    {editDraft === undefined ? null : <fieldset>
+      <legend>{t('editCandidate')}</legend>
+      <form
+        aria-label={t('editForm')}
+        onSubmit={(event) => {
+          event.preventDefault()
+          saveEdit()
+        }}
+      >
+        <textarea
+          aria-label={t('editContent')}
+          value={editDraft.content}
+          onChange={event => {
+            setEditDraft(value => value === undefined ? value : { ...value, content: event.target.value })
+          }}
+        />
+        <select
+          aria-label={t('editMemoryKind')}
+          value={editDraft.memoryKind}
+          onChange={event => {
+            setEditDraft(value => value === undefined
+              ? value
+              : { ...value, memoryKind: event.target.value as MemoryKind })
+          }}
+        >
+          {MEMORY_KINDS.map(kind => <option key={kind} value={kind}>{kind}</option>)}
+        </select>
+        <select
+          aria-label={t('editVisibility')}
+          value={editDraft.visibility}
+          onChange={event => {
+            setEditDraft(value => value === undefined
+              ? value
+              : { ...value, visibility: event.target.value as MemoryVisibility })
+          }}
+        >
+          <option value="personal">personal</option>
+          <option value="confidential">confidential</option>
+        </select>
+        <button type="submit" disabled={busy || editDraft.content.trim() === ''}>{t('saveEdit')}</button>
+        <button type="button" disabled={busy} onClick={() => { setEditDraft(undefined) }}>{t('cancel')}</button>
+      </form>
+    </fieldset>}
     {sourceView === undefined ? null : <fieldset>
       <legend>{t('source')}</legend>
       <p>{t('sourceEntity')}: {sourceView.entity} · {sourceView.id}</p>

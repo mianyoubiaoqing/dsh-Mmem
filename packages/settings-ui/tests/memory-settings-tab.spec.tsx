@@ -258,6 +258,88 @@ describe('dsh-Mmem Settings tab', () => {
     expect(rendered).toContain('candidate-parent-1')
   })
 
+  it('edits a pending Candidate through append-only governance', async () => {
+    const activeSpace = {
+      spaceId: 'space-project-alpha',
+      access: 'read-write' as const,
+      bindingRevision: 'binding-edit',
+    }
+    const candidate = {
+      schemaVersion: 2 as const,
+      event: 'candidate' as const,
+      id: 'candidate-edit-1',
+      ownerId: 'owner-fixture',
+      scope: { version: 1 as const, kind: 'companion-reality' as const },
+      observationId: 'observation-edit-1',
+      memoryKind: 'summary' as const,
+      createdAt: '2026-08-21T00:00:00.000Z',
+      recordedAt: '2026-08-21T00:00:00.000Z',
+      content: '编辑前的中性候选。',
+      visibility: 'personal' as const,
+      sourceMessageId: 'message-edit-1',
+      status: 'pending' as const,
+    }
+    const call = vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'memory/search') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          management: { schemaVersion: 1, records: [], candidates: [candidate], audit: [] },
+        },
+      }
+      if (endpoint === 'memory/edit') return {
+        ok: true as const,
+        value: { schemaVersion: 1, activeSpace, candidate: { ...candidate, id: 'candidate-edit-2' } },
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+    const edit = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:edit'))
+    if (edit === undefined) throw new Error('expected the Candidate edit button')
+    await act(async () => { edit.props.onClick() })
+    const editor = tree?.root.findByProps({ 'aria-label': 'translated:editContent' })
+    const kind = tree?.root.findByProps({ 'aria-label': 'translated:editMemoryKind' })
+    const visibility = tree?.root.findByProps({ 'aria-label': 'translated:editVisibility' })
+    await act(async () => {
+      editor?.props.onChange({ target: { value: '编辑后的中性偏好。' } })
+      kind?.props.onChange({ target: { value: 'preference' } })
+      visibility?.props.onChange({ target: { value: 'confidential' } })
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:editForm' })
+        .props.onSubmit({ preventDefault: vi.fn() })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenCalledWith(
+      '/dsh-mmem-settings',
+      'memory/edit',
+      expect.objectContaining({
+        sessionId: 'settings-session',
+        candidateIds: [candidate.id],
+        content: '编辑后的中性偏好。',
+        memoryKind: 'preference',
+        visibility: 'confidential',
+        requestId: expect.any(String),
+      }),
+      undefined,
+    )
+  })
+
   it('renders pending Candidates from the governed management projection', async () => {
     const searchResponse = {
       ok: true,
