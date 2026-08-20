@@ -20,3 +20,6 @@
 
     - id: dsh-mmem-settings-host
       name: '@mistymoon/dsh-memory/settings-host'
+
+    - id: dsh-mmem-settings-ui
+      name: '@mistymoon/dsh-memory-settings-ui'
