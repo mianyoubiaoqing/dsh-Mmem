@@ -619,6 +619,121 @@ describe('dsh-Mmem Settings tab', () => {
     )
   })
 
+  it('creates a selective direct Space Share Grant with the observed policy revision', async () => {
+    const activeSpace = {
+      spaceId: 'space-target',
+      access: 'read-write' as const,
+      bindingRevision: 'binding-sharing',
+    }
+    const spaces = [
+      {
+        schemaVersion: 1 as const,
+        id: 'space-source',
+        ownerId: 'owner-fixture',
+        name: 'Source',
+        createdAt: '2026-08-21T00:00:00.000Z',
+      },
+      {
+        schemaVersion: 1 as const,
+        id: 'space-target',
+        ownerId: 'owner-fixture',
+        name: 'Target',
+        createdAt: '2026-08-21T00:00:00.000Z',
+      },
+    ]
+    const call = vi.fn(async (_channel: string, endpoint: string, payload: unknown) => {
+      if (endpoint === 'memory/search') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          management: { schemaVersion: 1, records: [], candidates: [], audit: [] },
+        },
+      }
+      if (endpoint === 'sharing/get') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          spaces,
+          sharingPolicy: {
+            schemaVersion: 1,
+            ownerId: 'owner-fixture',
+            revision: 'sharing-v1',
+            mode: 'isolated' as const,
+            grants: [],
+            federations: [],
+          },
+        },
+      }
+      if (endpoint === 'sharing/replace') {
+        const update = payload as { grants: unknown[] }
+        return {
+          ok: true as const,
+          value: {
+            schemaVersion: 1,
+            activeSpace,
+            spaces,
+            sharingPolicy: {
+              schemaVersion: 1,
+              ownerId: 'owner-fixture',
+              revision: 'sharing-v2',
+              mode: 'selective' as const,
+              grants: update.grants,
+              federations: [],
+            },
+          },
+        }
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab rpc={{ call }} useSessions={useSessions} t={key => `translated:${key}`} />)
+    })
+    const configure = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:configureSharing'))
+    if (configure === undefined) throw new Error('expected sharing settings button')
+    await act(async () => {
+      configure.props.onClick()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:sharingMode' })
+        .props.onChange({ target: { value: 'selective' } })
+    })
+    await act(async () => {
+      tree?.root.findAllByType('button')
+        .find(button => button.children.includes('translated:addGrant'))?.props.onClick()
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:sharingForm' })
+        .props.onSubmit({ preventDefault: vi.fn() })
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenCalledWith(
+      '/dsh-mmem-settings',
+      'sharing/replace',
+      expect.objectContaining({
+        sessionId: 'settings-session',
+        expectedRevision: 'sharing-v1',
+        mode: 'selective',
+        grants: [expect.objectContaining({
+          sourceSpaceId: 'space-source',
+          targetSpaceId: 'space-target',
+          memoryKinds: ['summary'],
+          visibilities: ['personal'],
+        })],
+        federations: [],
+      }),
+      undefined,
+    )
+  })
+
   it('renders pending Candidates from the governed management projection', async () => {
     const searchResponse = {
       ok: true,

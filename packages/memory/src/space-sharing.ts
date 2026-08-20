@@ -78,6 +78,21 @@ export interface MemorySpaceRecallSourcesV1 {
   sources: readonly AuthorizedSpaceRecallSourceV1[]
 }
 
+/** Owner-bound Settings projection; callers cannot select or replace the Owner. */
+export interface MemorySpaceSharingSettingsSnapshotV1 {
+  schemaVersion: 1
+  spaces: Awaited<ReturnType<MemorySpaceCatalogV1['inspect']>>['spaces']
+  sharingPolicy: MemorySpaceSharingSnapshotV1
+}
+
+/** Owner-bound sharing policy seam used only after Session/Active Space authentication. */
+export interface MemorySpaceSharingSettingsV1 {
+  inspect(): Promise<MemorySpaceSharingSettingsSnapshotV1>
+  replacePolicy(
+    request: Omit<ReplaceMemorySpaceSharingPolicyRequestV1, 'ownerId'>,
+  ): Promise<MemorySpaceSharingSettingsSnapshotV1>
+}
+
 /** Public governance seam for versioned cross-Space recall authority. */
 export interface MemorySpaceSharingCatalogV1 {
   inspect(request: { ownerId: string }): Promise<MemorySpaceSharingSnapshotV1>
@@ -197,7 +212,8 @@ function parseFederation(value: unknown): SpaceFederationV1 {
   }
 }
 
-function parseSnapshot(value: unknown): MemorySpaceSharingSnapshotV1 {
+/** Parse one exact untrusted sharing policy at persistence or RPC boundaries. */
+export function parseMemorySpaceSharingSnapshotV1(value: unknown): MemorySpaceSharingSnapshotV1 {
   const policy = object(value, 'Memory Space sharing policy')
   exactKeys(policy, ['schemaVersion', 'ownerId', 'revision', 'mode', 'grants', 'federations'], 'Memory Space sharing policy')
   if (policy.schemaVersion !== 1
@@ -238,7 +254,7 @@ function parseDocument(value: unknown): MemorySpaceSharingDocumentV1 {
   if (document.schemaVersion !== 1 || !Array.isArray(document.policies)) {
     throw new Error('invalid Memory Space sharing document')
   }
-  const policies = document.policies.map(parseSnapshot)
+  const policies = document.policies.map(parseMemorySpaceSharingSnapshotV1)
   if (new Set(policies.map(policy => policy.ownerId)).size !== policies.length) {
     throw new Error('duplicate Memory Space sharing Owner policy')
   }
@@ -300,7 +316,7 @@ class FileMemorySpaceSharingCatalog implements MemorySpaceSharingCatalogV1 {
   }
 
   async replacePolicy(request: ReplaceMemorySpaceSharingPolicyRequestV1): Promise<MemorySpaceSharingSnapshotV1> {
-    const candidate = parseSnapshot({
+    const candidate = parseMemorySpaceSharingSnapshotV1({
       schemaVersion: 1,
       ownerId: request.ownerId,
       revision: safeId(this.createRevision(), 'Memory Space sharing revision'),
@@ -416,4 +432,25 @@ export async function openMemorySpaceSharingCatalog(
     options.leaseTimeoutMs ?? 30_000,
     options.leaseStaleMs ?? 120_000,
   )
+}
+
+/** Bind sharing Settings to one trusted Owner before browser RPC input is considered. */
+export function createMemorySpaceSharingSettings(
+  ownerId: string,
+  spaces: MemorySpaceCatalogV1,
+  sharing: MemorySpaceSharingCatalogV1,
+): MemorySpaceSharingSettingsV1 {
+  const trustedOwnerId = nonEmpty(ownerId, 'Memory Space sharing Settings Owner')
+  const inspect = async (): Promise<MemorySpaceSharingSettingsSnapshotV1> => ({
+    schemaVersion: 1,
+    spaces: (await spaces.inspect({ ownerId: trustedOwnerId })).spaces,
+    sharingPolicy: await sharing.inspect({ ownerId: trustedOwnerId }),
+  })
+  return {
+    inspect,
+    async replacePolicy(request) {
+      await sharing.replacePolicy({ ownerId: trustedOwnerId, ...request })
+      return inspect()
+    },
+  }
 }
