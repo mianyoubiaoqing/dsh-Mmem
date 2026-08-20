@@ -1,6 +1,6 @@
 import type { UserConfig } from 'tsdown'
 
-const packageId = '@mistymoon/dsh-mmem/settings-ui'
+const packageId = '@mistymoon/dsh-mmem'
 
 const client: UserConfig = {
   name: `${packageId}/client`,
