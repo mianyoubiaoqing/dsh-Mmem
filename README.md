@@ -14,6 +14,7 @@
 - Memory Space、DSH Workspace Binding 与完全隔离/有限互通/Federation 内完全互通的领域提案。
 - 第一阶段 `MemorySpaceCatalogV1`：版本化 Space、exact DSH `SessionHeader.cwd` Binding、唯一 Default Write、显式 Active Space 与跨进程 lease。
 - 第二阶段 `MemorySpaceArchiveRouterV1`：每 Space 独立 Archive、DSH pre-step/tool/candidate 路由、只读写入门与 Source Space/Binding recall receipt。
+- 第三阶段 `MemorySpaceGovernanceResolverV1`：Settings Host 只凭 DSH `SessionHeader` 解析 Active Space，Owner 由可信 loopback Adapter 固定；人工审批复用统一治理 facade，只读 Binding 失败关闭，候选不会跨 Space 混列。
 
 ## 目录
 
@@ -58,10 +59,10 @@ pnpm check
 
 1. 用统一 `GovernedMemoryV1` Interface 深化 Archive/governance/recall Module。
 2. 用 `MemoryPrincipalResolver` 解除 `mistymoonOwnerEligibility` 字符串依赖。
-3. 从 MistyMoon Settings UI 提取 Memory-owned Host/client。
+3. 从 MistyMoon Settings UI 提取 Memory-owned Host/client，并让 Host 只通过 `MemorySpaceGovernanceResolverV1` 审核 Active Space。
 4. 先发布默认人工审批的独立 MVP，再实现 `scheduled-auto`。
 5. 提供旧 `mistymoon/memory` 到新独立目录的只读 plan、exact digest、备份、Owner confirm、apply 与 rollback rehearsal。
-6. 在已完成的 Catalog、物理隔离和 DSH Runtime 路由上增加 Space-aware Settings governance，再分阶段实现非传递的有限共享和显式 Federation。
+6. 在已完成的 Catalog、物理隔离、Runtime 路由和 Space-aware Settings governance 上，分阶段实现非传递的有限共享和显式 Federation。
 
 ## 许可证
 
