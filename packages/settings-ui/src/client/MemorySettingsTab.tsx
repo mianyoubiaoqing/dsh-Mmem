@@ -199,6 +199,15 @@ function SessionMemorySettingsTab({
       <button type="submit">{t('applyFilters')}</button>
     </form>
     <fieldset>
+      <legend>{t('records')}</legend>
+      {snapshot.management.records.length === 0
+        ? <p>{t('noRecords')}</p>
+        : snapshot.management.records.map(record => <article key={record.id}>
+            <p>{record.content}</p>
+            <small>{record.memoryKind} · {record.visibility} · {record.status}</small>
+          </article>)}
+    </fieldset>
+    <fieldset>
       <legend>{t('candidates')}</legend>
       {snapshot.management.candidates.length === 0
         ? <p>{t('noCandidates')}</p>

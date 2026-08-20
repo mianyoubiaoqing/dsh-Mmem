@@ -127,6 +127,55 @@ describe('dsh-Mmem Settings tab', () => {
     )
   })
 
+  it('renders governed confirmed Memories alongside Candidate results', async () => {
+    const call = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: 'space-project-alpha',
+          access: 'read-write',
+          bindingRevision: 'binding-records',
+        },
+        management: {
+          schemaVersion: 1,
+          records: [{
+            schemaVersion: 2,
+            id: 'memory-confirmed-1',
+            ownerId: 'owner-fixture',
+            scope: { version: 1, kind: 'companion-reality' },
+            observationId: 'observation-record-1',
+            memoryKind: 'preference',
+            createdAt: '2026-08-21T00:01:00.000Z',
+            recordedAt: '2026-08-21T00:00:00.000Z',
+            content: '经治理确认的中性偏好。',
+            visibility: 'personal',
+            sourceMessageId: 'message-record-1',
+            status: 'confirmed',
+          }],
+          candidates: [],
+          audit: [],
+        },
+      },
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+
+    const rendered = JSON.stringify(tree?.toJSON())
+    expect(rendered).toContain('translated:records')
+    expect(rendered).toContain('经治理确认的中性偏好。')
+  })
+
   it('renders pending Candidates from the governed management projection', async () => {
     const searchResponse = {
       ok: true,
