@@ -3,79 +3,38 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type {
-  MemoryCandidate,
   MemoryBatchDecisionV1,
-  MemoryBatchGovernanceResultV1,
   MemoryManagementQueryV1,
-  MemoryManagementSnapshotV1,
-  MemoryRecord,
-  MemorySourceViewV1,
 } from './contracts.js'
 import { parseMemoryKind } from './domain.js'
-import type { MemoryConflictAssessmentV1 } from './conflict.js'
+import type {
+  MemoryAssessmentRpcSnapshotV1,
+  MemoryBatchRpcSnapshotV1,
+  MemoryCandidateApprovalSnapshotV1,
+  MemoryCandidateQueueSnapshotV1,
+  MemoryCandidateRejectionSnapshotV1,
+  MemoryCandidateRevisionRpcSnapshotV1,
+  MemoryManagementRpcSnapshotV1,
+  MemorySourceRpcSnapshotV1,
+} from './settings-client.js'
 import type { MemorySpaceGovernanceSessionV1 } from './space-governance.js'
+
+export type {
+  MemoryAssessmentRpcSnapshotV1,
+  MemoryBatchRpcSnapshotV1,
+  MemoryCandidateApprovalSnapshotV1,
+  MemoryCandidateQueueSnapshotV1,
+  MemoryCandidateRejectionSnapshotV1,
+  MemoryCandidateRevisionRpcSnapshotV1,
+  MemoryManagementRpcSnapshotV1,
+  MemorySourceRpcSnapshotV1,
+} from './settings-client.js'
 
 /** Cordis plugin name for the standalone Memory Settings Host. */
 export const name = 'dsh-mmem-settings-host'
 
 /** Only public DSH services and the Memory-owned governance resolver are required. */
 export const inject = ['connection', 'sessions', 'dshMmemSpaceGovernance']
-
-/** Candidate queue returned with the exact Active Space receipt used by Settings. */
-export interface MemoryCandidateQueueSnapshotV1 {
-  schemaVersion: 1
-  activeSpace: Pick<MemorySpaceGovernanceSessionV1, 'spaceId' | 'access' | 'bindingRevision'>
-  candidates: MemoryCandidate[]
-}
-
-/** Manual approval result retaining the Active Space receipt used for the write. */
-export interface MemoryCandidateApprovalSnapshotV1 {
-  schemaVersion: 1
-  activeSpace: Pick<MemorySpaceGovernanceSessionV1, 'spaceId' | 'access' | 'bindingRevision'>
-  memory: MemoryRecord
-}
-
-/** Manual rejection result retaining the Active Space receipt used for the write. */
-export interface MemoryCandidateRejectionSnapshotV1 {
-  schemaVersion: 1
-  activeSpace: Pick<MemorySpaceGovernanceSessionV1, 'spaceId' | 'access' | 'bindingRevision'>
-  candidate: MemoryCandidate
-}
-
-/** Owner management projection bound to one exact Active Space. */
-export interface MemoryManagementRpcSnapshotV1 {
-  schemaVersion: 1
-  activeSpace: Pick<MemorySpaceGovernanceSessionV1, 'spaceId' | 'access' | 'bindingRevision'>
-  management: MemoryManagementSnapshotV1
-}
-
-/** Provenance projection bound to one exact Active Space. */
-export interface MemorySourceRpcSnapshotV1 {
-  schemaVersion: 1
-  activeSpace: Pick<MemorySpaceGovernanceSessionV1, 'spaceId' | 'access' | 'bindingRevision'>
-  source: MemorySourceViewV1
-}
-
-/** Current conflict assessment bound to one exact Active Space. */
-export interface MemoryAssessmentRpcSnapshotV1 {
-  schemaVersion: 1
-  activeSpace: Pick<MemorySpaceGovernanceSessionV1, 'spaceId' | 'access' | 'bindingRevision'>
-  assessment: MemoryConflictAssessmentV1
-}
-
-/** Candidate revision result bound to one exact Active Space. */
-export interface MemoryCandidateRevisionRpcSnapshotV1 {
-  schemaVersion: 1
-  activeSpace: Pick<MemorySpaceGovernanceSessionV1, 'spaceId' | 'access' | 'bindingRevision'>
-  candidate: MemoryCandidate
-}
-
-/** Batch governance result bound to one exact Active Space. */
-export interface MemoryBatchRpcSnapshotV1 {
-  schemaVersion: 1
-  activeSpace: Pick<MemorySpaceGovernanceSessionV1, 'spaceId' | 'access' | 'bindingRevision'>
-  batch: MemoryBatchGovernanceResultV1
-}
 
 type MemorySettingsRpcResult =
   | { ok: true; value: unknown }

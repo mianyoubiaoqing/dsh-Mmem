@@ -5,21 +5,15 @@ import type {
   MemoryCandidate,
   MemoryBatchDecisionV1,
   MemoryCandidateDecision,
+  MemoryBatchGovernanceResultV1,
+  MemoryManagementSnapshotV1,
   MemoryManagementQueryV1,
   MemoryRecord,
+  MemorySourceViewV1,
   MemoryVisibility,
 } from './contracts.js'
+import type { MemoryConflictAssessmentV1 } from './conflict.js'
 import { parseMemoryKind, parseMemoryScopeV1, validateMemoryValidity, type MemoryKind } from './domain.js'
-import type {
-  MemoryAssessmentRpcSnapshotV1,
-  MemoryBatchRpcSnapshotV1,
-  MemoryCandidateApprovalSnapshotV1,
-  MemoryCandidateQueueSnapshotV1,
-  MemoryCandidateRejectionSnapshotV1,
-  MemoryCandidateRevisionRpcSnapshotV1,
-  MemoryManagementRpcSnapshotV1,
-  MemorySourceRpcSnapshotV1,
-} from './settings-host.js'
 
 const SETTINGS_CHANNEL = '/dsh-mmem-settings'
 
@@ -42,6 +36,69 @@ export interface MemorySettingsRpcCallerV1 {
     payload: unknown,
     signal?: AbortSignal,
   ): Promise<MemorySettingsRpcResult>
+}
+
+/** Exact Active Space authority retained with every Settings response. */
+export interface MemoryActiveSpaceReceiptV1 {
+  readonly spaceId: string
+  readonly access: 'read' | 'read-write'
+  readonly bindingRevision: string
+}
+
+/** Candidate queue returned with the exact Active Space receipt used by Settings. */
+export interface MemoryCandidateQueueSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  candidates: MemoryCandidate[]
+}
+
+/** Manual approval result retaining the Active Space receipt used for the write. */
+export interface MemoryCandidateApprovalSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  memory: MemoryRecord
+}
+
+/** Manual rejection result retaining the Active Space receipt used for the write. */
+export interface MemoryCandidateRejectionSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  candidate: MemoryCandidate
+}
+
+/** Owner management projection bound to one exact Active Space. */
+export interface MemoryManagementRpcSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  management: MemoryManagementSnapshotV1
+}
+
+/** Provenance projection bound to one exact Active Space. */
+export interface MemorySourceRpcSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  source: MemorySourceViewV1
+}
+
+/** Current conflict assessment bound to one exact Active Space. */
+export interface MemoryAssessmentRpcSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  assessment: MemoryConflictAssessmentV1
+}
+
+/** Candidate revision result bound to one exact Active Space. */
+export interface MemoryCandidateRevisionRpcSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  candidate: MemoryCandidate
+}
+
+/** Batch governance result bound to one exact Active Space. */
+export interface MemoryBatchRpcSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  batch: MemoryBatchGovernanceResultV1
 }
 
 /** Trusted browser state required to address one live DSH Session. */
@@ -261,8 +318,8 @@ function activeSpaceReceipt(value: unknown): MemoryCandidateQueueSnapshotV1['act
     'Active Space receipt',
   )
   if (typeof activeSpace.spaceId !== 'string' || activeSpace.spaceId.trim() === ''
-    || (activeSpace.access !== 'read-only' && activeSpace.access !== 'read-write')
-    || !Number.isSafeInteger(activeSpace.bindingRevision) || (activeSpace.bindingRevision as number) < 1) {
+    || (activeSpace.access !== 'read' && activeSpace.access !== 'read-write')
+    || typeof activeSpace.bindingRevision !== 'string' || activeSpace.bindingRevision.trim() === '') {
     throw new MemorySettingsClientError('invalid-response', 'Active Space receipt has invalid values')
   }
   return activeSpace as unknown as MemoryCandidateQueueSnapshotV1['activeSpace']

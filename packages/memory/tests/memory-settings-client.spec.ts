@@ -10,7 +10,7 @@ describe('dsh-Mmem Settings browser client', () => {
         activeSpace: {
           spaceId: 'space-project-alpha',
           access: 'read-write',
-          bindingRevision: 4,
+          bindingRevision: 'binding-4',
         },
         candidates: [],
       },
@@ -27,7 +27,7 @@ describe('dsh-Mmem Settings browser client', () => {
       activeSpace: {
         spaceId: 'space-project-alpha',
         access: 'read-write',
-        bindingRevision: 4,
+        bindingRevision: 'binding-4',
       },
       candidates: [],
     })
@@ -52,7 +52,7 @@ describe('dsh-Mmem Settings browser client', () => {
             activeSpace: {
               spaceId: 'space-project-alpha',
               access: 'read-write',
-              bindingRevision: 4,
+              bindingRevision: 'binding-4',
             },
             candidates: [{ id: 'candidate-without-governance-fields' }],
           },
@@ -74,8 +74,8 @@ describe('dsh-Mmem Settings browser client', () => {
         schemaVersion: 1,
         activeSpace: {
           spaceId: 'space-project-alpha',
-          access: 'read-only',
-          bindingRevision: 7,
+          access: 'read',
+          bindingRevision: 'binding-7',
         },
         management: {
           schemaVersion: 1,
@@ -100,8 +100,8 @@ describe('dsh-Mmem Settings browser client', () => {
     })).resolves.toEqual(expect.objectContaining({
       activeSpace: {
         spaceId: 'space-project-alpha',
-        access: 'read-only',
-        bindingRevision: 7,
+        access: 'read',
+        bindingRevision: 'binding-7',
       },
     }))
     expect(call).toHaveBeenCalledExactlyOnceWith(
@@ -129,8 +129,8 @@ describe('dsh-Mmem Settings browser client', () => {
             schemaVersion: 1,
             activeSpace: {
               spaceId: 'space-project-alpha',
-              access: 'read-only',
-              bindingRevision: 7,
+              access: 'read',
+              bindingRevision: 'binding-7',
             },
             management: {
               schemaVersion: 1,
@@ -158,7 +158,7 @@ describe('dsh-Mmem Settings browser client', () => {
         activeSpace: {
           spaceId: 'space-project-alpha',
           access: 'read-write',
-          bindingRevision: 8,
+          bindingRevision: 'binding-8',
         },
         source: {
           schemaVersion: 1,
@@ -201,7 +201,7 @@ describe('dsh-Mmem Settings browser client', () => {
         activeSpace: {
           spaceId: 'space-project-alpha',
           access: 'read-write',
-          bindingRevision: 8,
+          bindingRevision: 'binding-8',
         },
         assessment: {
           schemaVersion: 1,
@@ -235,7 +235,7 @@ describe('dsh-Mmem Settings browser client', () => {
         activeSpace: {
           spaceId: 'space-project-alpha',
           access: 'read-write',
-          bindingRevision: 9,
+          bindingRevision: 'binding-9',
         },
         memory: {
           schemaVersion: 2,
@@ -284,7 +284,7 @@ describe('dsh-Mmem Settings browser client', () => {
         activeSpace: {
           spaceId: 'space-project-alpha',
           access: 'read-write',
-          bindingRevision: 9,
+          bindingRevision: 'binding-9',
         },
         candidate: {
           schemaVersion: 2,
@@ -332,7 +332,7 @@ describe('dsh-Mmem Settings browser client', () => {
         activeSpace: {
           spaceId: 'space-project-alpha',
           access: 'read-write',
-          bindingRevision: 10,
+          bindingRevision: 'binding-10',
         },
         candidate: {
           schemaVersion: 2,
@@ -389,7 +389,7 @@ describe('dsh-Mmem Settings browser client', () => {
         activeSpace: {
           spaceId: 'space-project-alpha',
           access: 'read-write',
-          bindingRevision: 10,
+          bindingRevision: 'binding-10',
         },
         candidate: {
           schemaVersion: 2,
@@ -446,7 +446,7 @@ describe('dsh-Mmem Settings browser client', () => {
         activeSpace: {
           spaceId: 'space-project-alpha',
           access: 'read-write',
-          bindingRevision: 11,
+          bindingRevision: 'binding-11',
         },
         batch: {
           schemaVersion: 1,
