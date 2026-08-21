@@ -128,7 +128,6 @@ dsh-Mmem/
 │  ├─ settings-ui/  Session-bound DSH Settings tab 与 browser bundle
 │  └─ bundle/       唯一公开包 @mistymoon/dsh-mmem
 ├─ scripts/         构建、发布审计与迁移 CLI
-├─ research/        竞品调研与发行验收记录
 ├─ cordis.patch.yml 开发组合入口
 └─ AGENTS.md
 ```
@@ -158,11 +157,8 @@ npm publish .\.artifacts\npm\mistymoon-dsh-mmem-VERSION.tgz --tag alpha --access
 
 每个新版本发布后，都应从 registry 包在全新 DSH Home 中重复 clean Profile 验收。
 
-## 兼容性、调研与许可证
+## 问题反馈与许可证
 
-- 当前发行验收：[`research/release-readiness-0.0.1-alpha.1.md`](research/release-readiness-0.0.1-alpha.1.md)
-- 上一版本发行验收：[`research/release-readiness-0.0.1-alpha.0.md`](research/release-readiness-0.0.1-alpha.0.md)
-- DSH 记忆插件生态、差异化与采用判断：[`research/dsh-memory-plugin-ecosystem-2026-08-21.md`](research/dsh-memory-plugin-ecosystem-2026-08-21.md)
 - 问题反馈：[GitHub Issues](https://github.com/mianyoubiaoqing/dsh-Mmem/issues)
 
 本项目使用 MIT License。外部 Provider、模型、二进制与第三方代码保留各自许可证；LivingMemory 是 AGPL-3.0 项目，只作为产品行为参考，其实现不会复制到本 MIT 仓库。
