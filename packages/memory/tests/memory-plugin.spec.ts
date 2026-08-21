@@ -7,7 +7,7 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import AgentRegistry, { agentEvents, Inbox, type Agent } from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import * as IdentityPlugin from '@mistymoon/dsh-identity'
+import * as PrincipalLocalPlugin from '../src/principal-local.js'
 import { describe, expect, it } from 'vitest'
 import * as MemoryPlugin from '../src/index.js'
 import { PERSONAL_COMPANION_ACCESS } from './fixtures.js'
@@ -37,7 +37,7 @@ describe('MistyMoon memory plugin', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(AgentRegistry)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, {
       spaceCatalogPath: join(root, 'catalog.json'),
       spacesRoot: join(root, 'spaces'),
@@ -83,7 +83,7 @@ describe('MistyMoon memory plugin', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(AgentRegistry)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, {
       spaceCatalogPath: join(root, 'catalog.json'),
       spacesRoot: join(root, 'spaces'),
@@ -160,7 +160,7 @@ describe('MistyMoon memory plugin', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(AgentRegistry)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, { path: join(root, 'memory.jsonl'), recallLimit: 4 })
     let calls = 0
     ctx.mistymoonMemoryCandidateExtraction.register({
@@ -215,7 +215,7 @@ describe('MistyMoon memory plugin', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(AgentRegistry)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, { path: join(root, 'memory.jsonl'), recallLimit: 4 })
     expect(ctx.mistymoonMemory).toBeDefined()
     expect(ctx.mistymoonMemoryGovernance).toBeDefined()
@@ -276,7 +276,7 @@ describe('MistyMoon memory plugin', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(AgentRegistry)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, { path, recallLimit: 4 })
     let extractionCalls = 0
     ctx.mistymoonMemoryCandidateExtraction.register({
@@ -344,7 +344,7 @@ describe('MistyMoon memory plugin', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(AgentRegistry)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, { path, recallLimit: 4 })
     const session = Session.create(SessionId('memory-migration-required-session'))
     const agent = sessionAgent(session)

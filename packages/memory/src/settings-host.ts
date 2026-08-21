@@ -10,6 +10,7 @@ import { parseMemoryKind } from './domain.js'
 import type {
   MemoryAssessmentRpcSnapshotV1,
   MemoryBatchRpcSnapshotV1,
+  MemoryApprovalSettingsRpcSnapshotV1,
   MemoryCandidateApprovalSnapshotV1,
   MemoryCandidateQueueSnapshotV1,
   MemoryCandidateRejectionSnapshotV1,
@@ -18,10 +19,12 @@ import type {
   MemorySourceRpcSnapshotV1,
 } from './settings-client.js'
 import type { MemorySpaceGovernanceSessionV1 } from './space-governance.js'
+import { MemoryRuntimeSettingsError, type MemoryApprovalPolicyUpdateV1 } from './runtime-settings.js'
 
 export type {
   MemoryAssessmentRpcSnapshotV1,
   MemoryBatchRpcSnapshotV1,
+  MemoryApprovalSettingsRpcSnapshotV1,
   MemoryCandidateApprovalSnapshotV1,
   MemoryCandidateQueueSnapshotV1,
   MemoryCandidateRejectionSnapshotV1,
@@ -34,14 +37,14 @@ export type {
 export const name = 'dsh-mmem-settings-host'
 
 /** Only public DSH services and the Memory-owned governance resolver are required. */
-export const inject = ['connection', 'sessions', 'dshMmemSpaceGovernance']
+export const inject = ['connection', 'sessions', 'dshMmemSpaceGovernance', 'dshMmemRuntimeSettings']
 
 type MemorySettingsRpcResult =
   | { ok: true; value: unknown }
   | {
       ok: false
       error: {
-        code: 'bad-request' | 'session-not-found'
+        code: 'bad-request' | 'session-not-found' | 'settings-revision-conflict' | 'settings-not-configured'
         message: string
         details: Record<string, unknown>
       }
@@ -337,6 +340,46 @@ function memoryBatch(value: unknown): {
   }
 }
 
+type MemoryApprovalUpdateInput = {
+  sessionId: SessionId
+  requestedSpaceId?: string
+  update: MemoryApprovalPolicyUpdateV1
+}
+
+function memoryApprovalUpdate(value: unknown): MemoryApprovalUpdateInput | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const scheduled = input.mode === 'scheduled-auto'
+  const keys = [
+    'sessionId',
+    'expectedRevision',
+    'mode',
+    ...(input.requestedSpaceId === undefined ? [] : ['requestedSpaceId']),
+    ...(scheduled ? ['timeZone', 'localTime'] : []),
+  ]
+  if (!exactObject(value, keys)
+    || typeof input.sessionId !== 'string' || input.sessionId.trim() === ''
+    || !Number.isSafeInteger(input.expectedRevision) || (input.expectedRevision as number) < 0
+    || (input.mode !== 'manual' && input.mode !== 'scheduled-auto')
+    || (input.requestedSpaceId !== undefined
+      && (typeof input.requestedSpaceId !== 'string' || input.requestedSpaceId.trim() === ''))
+    || (scheduled && (typeof input.timeZone !== 'string' || typeof input.localTime !== 'string'))) {
+    return undefined
+  }
+  return {
+    sessionId: SessionId(input.sessionId),
+    ...(input.requestedSpaceId === undefined ? {} : { requestedSpaceId: input.requestedSpaceId as string }),
+    update: input.mode === 'manual'
+      ? { expectedRevision: input.expectedRevision as number, mode: 'manual' }
+      : {
+          expectedRevision: input.expectedRevision as number,
+          mode: 'scheduled-auto',
+          timeZone: input.timeZone as string,
+          localTime: input.localTime as string,
+        },
+  }
+}
+
 function activeSpaceReceipt(governance: MemorySpaceGovernanceSessionV1) {
   return {
     spaceId: governance.spaceId,
@@ -357,7 +400,9 @@ export function apply(ctx: Context): void {
         && endpoint !== 'memory/assess'
         && endpoint !== 'memory/edit'
         && endpoint !== 'memory/merge'
-        && endpoint !== 'memory/batch') {
+        && endpoint !== 'memory/batch'
+        && endpoint !== 'settings/get'
+        && endpoint !== 'settings/approval') {
         return badRequest('Unknown dsh-Mmem Settings operation.')
       }
       const decision = endpoint === 'candidates/approve' || endpoint === 'candidates/reject'
@@ -370,13 +415,15 @@ export function apply(ctx: Context): void {
         ? memoryCandidateRevision(payload)
         : undefined
       const batch = endpoint === 'memory/batch' ? memoryBatch(payload) : undefined
-      const selection = endpoint === 'candidates/list'
+      const approvalUpdate = endpoint === 'settings/approval' ? memoryApprovalUpdate(payload) : undefined
+      const selection = endpoint === 'candidates/list' || endpoint === 'settings/get'
         ? sessionSelection(payload)
-        : decision ?? search ?? source ?? assessment ?? revision ?? batch
+        : decision ?? search ?? source ?? assessment ?? revision ?? batch ?? approvalUpdate
       if (selection === undefined) {
-        if (endpoint === 'candidates/list') {
+        if (endpoint === 'candidates/list' || endpoint === 'settings/get') {
           return badRequest('Candidate listing requires one live DSH sessionId and an optional requestedSpaceId.')
         }
+        if (endpoint === 'settings/approval') return badRequest('Memory approval policy update is invalid.')
         if (endpoint === 'memory/search') return badRequest('Memory search filters are invalid.')
         if (endpoint === 'memory/source') return badRequest('Memory source selection is invalid.')
         if (endpoint === 'memory/assess') return badRequest('Memory Candidate assessment selection is invalid.')
@@ -407,6 +454,20 @@ export function apply(ctx: Context): void {
             ? {}
             : { requestedSpaceId: selection.requestedSpaceId }),
         })
+        if (endpoint === 'settings/get' || approvalUpdate !== undefined) {
+          if (approvalUpdate !== undefined && governance.access !== 'read-write') {
+            return badRequest('Memory approval policy updates require a read-write Active Space Binding.')
+          }
+          const settings = approvalUpdate === undefined
+            ? await ctx.dshMmemRuntimeSettings.get()
+            : await ctx.dshMmemRuntimeSettings.updateApproval(approvalUpdate.update)
+          const value: MemoryApprovalSettingsRpcSnapshotV1 = {
+            schemaVersion: 1,
+            activeSpace: activeSpaceReceipt(governance),
+            approvalPolicy: settings.approvalPolicy,
+          }
+          return { ok: true, value }
+        }
         if (search !== undefined) {
           const value: MemoryManagementRpcSnapshotV1 = {
             schemaVersion: 1,
@@ -496,6 +557,18 @@ export function apply(ctx: Context): void {
         }
         return { ok: true, value }
       } catch (error) {
+        if (error instanceof MemoryRuntimeSettingsError) {
+          return {
+            ok: false,
+            error: {
+              code: error.code === 'SETTINGS_REVISION_CONFLICT'
+                ? 'settings-revision-conflict'
+                : 'settings-not-configured',
+              message: error.message,
+              details: {},
+            },
+          }
+        }
         return badRequest(error instanceof Error ? error.message : 'Memory Space governance is unavailable.')
       }
     }, { authority: 'loopback' }),

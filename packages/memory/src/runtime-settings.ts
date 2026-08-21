@@ -3,11 +3,43 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { lock as acquireProperLock } from 'proper-lockfile'
+import {
+  defaultMemoryApprovalPolicyV1,
+  parseMemoryApprovalPolicyUpdateV1,
+  parseMemoryApprovalPolicyV1,
+  type MemoryApprovalPolicyUpdateV1,
+  type MemoryApprovalPolicyV1,
+} from './approval-policy.js'
+
+export type { MemoryApprovalPolicyUpdateV1, MemoryApprovalPolicyV1 } from './approval-policy.js'
 
 /** Current private runtime-settings document. */
 export interface MemoryRuntimeSettings {
   schemaVersion: 1
   recallLimit: number
+  approvalPolicy: MemoryApprovalPolicyV1
+}
+
+/** Stable runtime-settings failure surfaced through the Settings Host. */
+export class MemoryRuntimeSettingsError extends Error {
+  constructor(readonly code: 'SETTINGS_REVISION_CONFLICT' | 'SETTINGS_NOT_CONFIGURED', message: string) {
+    super(message)
+    this.name = 'MemoryRuntimeSettingsError'
+  }
+}
+
+/** Memory-owned settings Manager used by Host RPC and runtime consumers. */
+export interface MemoryRuntimeSettingsManagerV1 {
+  readonly configured: boolean
+  get(): Promise<MemoryRuntimeSettings>
+  updateApproval(value: unknown): Promise<MemoryRuntimeSettings>
+}
+
+/** Construction options for the private settings Manager. */
+export interface MemoryRuntimeSettingsManagerOptionsV1 {
+  path?: string
+  fallbackRecallLimit: number
 }
 
 /** Default upper bound for one recalled-memory snapshot. */
@@ -18,6 +50,21 @@ function recallLimit(value: unknown): number {
     throw new Error('memory settings recallLimit must be an integer from 1 through 20')
   }
   return value as number
+}
+
+function object(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`)
+  }
+  return value as Record<string, unknown>
+}
+
+function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void {
+  const actual = Object.keys(value).toSorted()
+  const keys = [...expected].toSorted()
+  if (actual.length !== keys.length || actual.some((key, index) => key !== keys[index])) {
+    throw new Error(`${label} contains missing or unknown fields`)
+  }
 }
 
 /**
@@ -31,7 +78,15 @@ export function parseMemoryRuntimeSettings(value: unknown): MemoryRuntimeSetting
   }
   const record = value as Record<string, unknown>
   if (record.schemaVersion !== 1) throw new Error('memory settings schemaVersion must equal 1')
-  return { schemaVersion: 1, recallLimit: recallLimit(record.recallLimit) }
+  const allowed = record.approvalPolicy === undefined
+    ? ['schemaVersion', 'recallLimit']
+    : ['schemaVersion', 'recallLimit', 'approvalPolicy']
+  exactKeys(record, allowed, 'memory settings')
+  return {
+    schemaVersion: 1,
+    recallLimit: recallLimit(record.recallLimit),
+    approvalPolicy: parseMemoryApprovalPolicyV1(record.approvalPolicy),
+  }
 }
 
 /**
@@ -49,7 +104,11 @@ export async function loadMemoryRuntimeSettings(
     source = await readFile(path, 'utf8')
   } catch (error) {
     if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { schemaVersion: 1, recallLimit: recallLimit(fallbackRecallLimit) }
+      return {
+        schemaVersion: 1,
+        recallLimit: recallLimit(fallbackRecallLimit),
+        approvalPolicy: defaultMemoryApprovalPolicyV1(),
+      }
     }
     throw error
   }
@@ -77,4 +136,84 @@ export async function saveMemoryRuntimeSettings(path: string, value: unknown): P
     await rm(temporary, { force: true })
   }
   return settings
+}
+
+/**
+ * Atomically replace only the Owner approval policy after checking its observed revision.
+ * Callers must retry from a freshly loaded document after SETTINGS_REVISION_CONFLICT.
+ */
+export async function updateMemoryApprovalPolicy(
+  path: string,
+  fallbackRecallLimit: number,
+  value: unknown,
+): Promise<MemoryRuntimeSettings> {
+  const update = parseMemoryApprovalPolicyUpdateV1(value)
+  await mkdir(dirname(path), { recursive: true })
+  const release = await acquireProperLock(path, {
+    realpath: false,
+    stale: 120_000,
+    update: 60_000,
+    retries: { retries: 600, minTimeout: 50, maxTimeout: 50, randomize: false },
+  })
+  try {
+    const current = await loadMemoryRuntimeSettings(path, fallbackRecallLimit)
+    if (current.approvalPolicy.revision !== update.expectedRevision) {
+      throw new MemoryRuntimeSettingsError(
+        'SETTINGS_REVISION_CONFLICT',
+        `memory approval policy revision changed from ${String(update.expectedRevision)} `
+          + `to ${String(current.approvalPolicy.revision)}`,
+      )
+    }
+    const nextRevision = current.approvalPolicy.revision + 1
+    if (!Number.isSafeInteger(nextRevision)) throw new Error('memory approval policy revision is exhausted')
+    return await saveMemoryRuntimeSettings(path, {
+      ...current,
+      approvalPolicy: update.mode === 'manual'
+        ? { schemaVersion: 1, revision: nextRevision, mode: 'manual' }
+        : {
+            schemaVersion: 1,
+            revision: nextRevision,
+            mode: 'scheduled-auto',
+            timeZone: update.timeZone,
+            localTime: update.localTime,
+          },
+    })
+  } finally {
+    await release()
+  }
+}
+
+/** Create one Manager over the configured private settings document. */
+export function createMemoryRuntimeSettingsManager(
+  options: MemoryRuntimeSettingsManagerOptionsV1,
+): MemoryRuntimeSettingsManagerV1 {
+  return {
+    configured: options.path !== undefined,
+    async get() {
+      if (options.path === undefined) {
+        return {
+          schemaVersion: 1,
+          recallLimit: recallLimit(options.fallbackRecallLimit),
+          approvalPolicy: defaultMemoryApprovalPolicyV1(),
+        }
+      }
+      return loadMemoryRuntimeSettings(options.path, options.fallbackRecallLimit)
+    },
+    async updateApproval(value) {
+      if (options.path === undefined) {
+        throw new MemoryRuntimeSettingsError(
+          'SETTINGS_NOT_CONFIGURED',
+          'memory approval settings require a private settingsPath',
+        )
+      }
+      return updateMemoryApprovalPolicy(options.path, options.fallbackRecallLimit, value)
+    },
+  }
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Private versioned runtime settings owned by dsh-Mmem. */
+    dshMmemRuntimeSettings: MemoryRuntimeSettingsManagerV1
+  }
 }

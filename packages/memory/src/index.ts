@@ -43,7 +43,23 @@ import type {
   MemorySourceViewV1,
   MemoryVisibility,
 } from './contracts.js'
-import { DEFAULT_RECALL_LIMIT, loadMemoryRuntimeSettings } from './runtime-settings.js'
+import {
+  createMemoryRuntimeSettingsManager,
+  DEFAULT_RECALL_LIMIT,
+  loadMemoryRuntimeSettings,
+} from './runtime-settings.js'
+import {
+  MemoryScheduledApprovalRunnerRegistryV1,
+  createMemoryApprovalSchedulerV1,
+} from './approval-scheduler.js'
+import {
+  MemoryApprovalReviewEvaluatorRegistryV1,
+  createGovernedMemoryScheduledApprovalRunnerV1,
+} from './approval-review.js'
+import {
+  createDshAgentApprovalReviewSessionDriverV1,
+  createDshMemoryApprovalReviewEvaluatorV1,
+} from './approval-review-dsh.js'
 import {
   CandidateExtractionRegistry,
   extractMemoryCandidates,
@@ -95,6 +111,7 @@ import {
   createMemorySpaceGovernanceResolver,
   type MemorySpaceGovernanceResolverV1,
 } from './space-governance.js'
+import type { MemoryPrincipalResolverV1, MemoryPrincipalV1 } from './principal.js'
 
 export * from './contracts.js'
 export * from './candidate-extraction.js'
@@ -105,14 +122,21 @@ export * from './lifecycle.js'
 export * from './domain.js'
 export * from './runtime-settings.js'
 export * from './space-catalog.js'
+export * from './space-sharing.js'
 export * from './space-archive-router.js'
 export * from './space-governance.js'
+export * from './principal.js'
+export * from './approval-policy.js'
+export * from './approval-schedule.js'
+export * from './approval-scheduler.js'
+export * from './approval-review.js'
+export * from './approval-review-dsh.js'
 
 /** Cordis plugin name and durable user-message source id. */
 export const name = 'mistymoon-memory'
 
 /** Agent pre-step waterfall used for durable memory projection. */
-export const inject = ['agents', 'tools', 'mistymoonOwnerEligibility']
+export const inject = ['agents', 'tools', 'dshMmemPrincipalResolver']
 
 /** Memory plugin configuration. */
 export interface Config {
@@ -126,6 +150,22 @@ export interface Config {
   recallLimit?: number
   /** Optional private owner settings document read before each recall. */
   settingsPath?: string
+  /** Optional payload-free scheduler state path; defaults adjacent to settingsPath. */
+  approvalSchedulerPath?: string
+  /** Local scheduler policy polling interval. */
+  approvalPollIntervalMs?: number
+  /** Maximum Candidates considered by one scheduled run across all Spaces. */
+  approvalMaxCandidates?: number
+  /** Minimum evaluator confidence required before any automatic decision. */
+  approvalMinimumConfidence?: number
+  /** Whether scheduled-auto may use isolated DSH Agent Sessions for review. */
+  approvalReviewEnabled?: boolean
+  /** Optional DSH provider route for review Sessions; omitted uses the deployment default. */
+  approvalReviewProvider?: string
+  /** Optional DSH model for review Sessions; omitted uses the deployment default. */
+  approvalReviewModel?: string
+  /** Maximum output tokens for one Candidate review response. */
+  approvalReviewMaxTokens?: number
   /** Maximum time to wait for the cross-process archive lease. */
   leaseTimeoutMs?: number
   /** Age after which an unrefreshed archive lease may be reclaimed. */
@@ -149,6 +189,14 @@ export const Config: z<Config> = z.object({
   spacesRoot: z.string(),
   recallLimit: z.number().step(1).min(1).max(20).default(DEFAULT_RECALL_LIMIT),
   settingsPath: z.string(),
+  approvalSchedulerPath: z.string(),
+  approvalPollIntervalMs: z.number().step(1).min(1_000).max(3_600_000).default(60_000),
+  approvalMaxCandidates: z.number().step(1).min(1).max(1_000).default(100),
+  approvalMinimumConfidence: z.number().min(0.5).max(1).default(0.9),
+  approvalReviewEnabled: z.boolean().default(true),
+  approvalReviewProvider: z.string(),
+  approvalReviewModel: z.string(),
+  approvalReviewMaxTokens: z.number().step(1).min(64).max(4_096).default(512),
   leaseTimeoutMs: z.number().step(1).min(100).max(60_000).default(30_000),
   leaseStaleMs: z.number().step(1).min(5_000).max(600_000).default(120_000),
   disposeTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
@@ -1358,23 +1406,10 @@ function boundedListLimit(limit: number | undefined): number {
   return resolved
 }
 
-interface MemoryOwnerEligibility {
-  ownerMessages(agent: Agent, messages: readonly UserMessage[]): readonly UserMessage[]
-  evaluateMessage(agent: Agent, message: UserMessage): {
-    readonly eligible: boolean
-    readonly ownerId?: string
-    readonly authority?: string
-  }
-  evaluateCurrentTurn(agent: Agent): {
-    readonly eligible: boolean
-    readonly ownerId?: string
-    readonly authority?: string
-  }
-  trustedLocalOwner?(): { readonly ownerId: string; readonly authority: string }
-}
-
-function ownerEligibility(ctx: Context): MemoryOwnerEligibility {
-  return ctx.get('mistymoonOwnerEligibility', true) as MemoryOwnerEligibility
+function principalResolver(ctx: Context): MemoryPrincipalResolverV1 {
+  const resolver = ctx.get('dshMmemPrincipalResolver', true)
+  if (resolver === undefined) throw new Error('dsh-Mmem requires a Memory principal resolver')
+  return resolver
 }
 
 const MEMORY_TOOL_NAMES = new Set([
@@ -1391,10 +1426,10 @@ const MEMORY_TOOL_NAMES = new Set([
 function memoryOwnerGuard(ctx: Context, execution: Readonly<ToolExecution>): string | undefined {
   if (!MEMORY_TOOL_NAMES.has(execution.name)) return undefined
   const agent = execution.agent
-  if (agent !== undefined && ownerEligibility(ctx).evaluateCurrentTurn(agent).eligible) {
+  if (agent !== undefined && principalResolver(ctx).currentTurn(agent) !== undefined) {
     return undefined
   }
-  return 'MistyMoon memory tools require an authenticated Owner request in the active top-level turn.'
+  return 'dsh-Mmem tools require an authenticated Owner request in the active top-level turn.'
 }
 
 const COMPANION_SCOPE = { version: 1, kind: 'companion-reality' } as const
@@ -1415,7 +1450,11 @@ function currentTurnText(agent: Agent): string {
   return events.slice(start).flatMap(event => event.type === 'user/message' ? [userText(event.data)] : []).join('\n')
 }
 
-function currentTurnOwnerMessages(agent: Agent, turn: number, eligibility: MemoryOwnerEligibility): UserMessage[] {
+function currentTurnOwnerMessages(
+  agent: Agent,
+  turn: number,
+  resolver: MemoryPrincipalResolverV1,
+): UserMessage[] {
   const events = agent.session.events
   let start = -1
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -1429,7 +1468,7 @@ function currentTurnOwnerMessages(agent: Agent, turn: number, eligibility: Memor
   const messages = events.slice(start)
     .filter(event => event.type === 'user/message')
     .map(event => event.data)
-  return [...eligibility.ownerMessages(agent, messages)]
+  return messages.filter(message => resolver.message(agent, message) !== undefined)
 }
 
 function turnHasCompletedReply(agent: Agent, turn: number): boolean {
@@ -1439,17 +1478,17 @@ function turnHasCompletedReply(agent: Agent, turn: number): boolean {
 }
 
 function ownerContext(
-  decision: ReturnType<MemoryOwnerEligibility['evaluateCurrentTurn']>,
+  principal: MemoryPrincipalV1 | undefined,
   channelDisclosure: MemoryAccessContextV1['channelDisclosure'],
   text: string,
 ): MemoryAccessContextV1 {
-  if (!decision.eligible || decision.ownerId === undefined || decision.authority === undefined) {
+  if (principal === undefined) {
     throw new Error('memory access requires an authenticated Owner decision')
   }
   return {
     version: 1,
-    ownerId: decision.ownerId,
-    authority: decision.authority,
+    ownerId: principal.ownerId,
+    authority: principal.authority,
     scope: COMPANION_SCOPE,
     channelDisclosure,
     requestIntent: explicitConfidentialRecallIntent(text) ? 'explicit-confidential-recall' : 'ordinary',
@@ -1463,7 +1502,7 @@ function toolContext(
 ): MemoryAccessContextV1 {
   const agent = execution.agent
   if (agent === undefined) throw new Error('memory tool requires an active Owner agent')
-  return ownerContext(ownerEligibility(ctx).evaluateCurrentTurn(agent), channelDisclosure, currentTurnText(agent))
+  return ownerContext(principalResolver(ctx).currentTurn(agent), channelDisclosure, currentTurnText(agent))
 }
 
 type MemoryArchiveOperations = Omit<CompanionMemoryArchive, 'dispose'>
@@ -1780,20 +1819,24 @@ function registerMemoryTools(
 }
 
 function memoryGovernanceService(
-  eligibility: MemoryOwnerEligibility,
+  resolver: MemoryPrincipalResolverV1,
   archive: CompanionMemoryArchive,
 ): MemoryGovernanceService {
-  const identity = eligibility.trustedLocalOwner?.()
-  if (identity === undefined) throw new Error('memory governance requires a trusted local Owner adapter')
+  return createMemoryGovernanceService(trustedGovernanceContext(resolver), archive)
+}
+
+function trustedGovernanceContext(resolver: MemoryPrincipalResolverV1): MemoryAccessContextV1 {
+  const principal = resolver.trustedLocal()
+  if (principal === undefined) throw new Error('memory governance requires a trusted local principal Adapter')
   const context: MemoryAccessContextV1 = {
     version: 1,
-    ownerId: identity.ownerId,
-    authority: identity.authority,
+    ownerId: principal.ownerId,
+    authority: principal.authority,
     scope: COMPANION_SCOPE,
     channelDisclosure: 'owner-confidential',
     requestIntent: 'explicit-confidential-recall',
   }
-  return createMemoryGovernanceService(context, archive)
+  return context
 }
 
 /**
@@ -1847,23 +1890,77 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         spacesRoot: config.spacesRoot,
       })
   const extraction = new CandidateExtractionRegistry()
+  const runtimeSettings = createMemoryRuntimeSettingsManager({
+    fallbackRecallLimit: recallLimit,
+    ...(config.settingsPath === undefined ? {} : { path: config.settingsPath }),
+  })
+  ctx.effect(
+    () => ctx.provide('dshMmemRuntimeSettings', runtimeSettings),
+    'dsh-mmem: private runtime settings Manager',
+  )
+  if (config.approvalSchedulerPath !== undefined && config.settingsPath === undefined) {
+    throw new TypeError('mistymoon-memory: approvalSchedulerPath requires settingsPath')
+  }
+  const approvalRunners = new MemoryScheduledApprovalRunnerRegistryV1()
+  const approvalReviewEvaluators = new MemoryApprovalReviewEvaluatorRegistryV1()
+  ctx.effect(
+    () => ctx.provide('dshMmemScheduledApprovalRunners', approvalRunners),
+    'dsh-mmem: scheduled approval runner registry',
+  )
+  ctx.effect(
+    () => ctx.provide('dshMmemApprovalReviewEvaluators', approvalReviewEvaluators),
+    'dsh-mmem: DSH-logged approval review evaluator registry',
+  )
+  if (config.settingsPath !== undefined && catalog !== undefined && router !== undefined) {
+    const governedApprovalRunner = createGovernedMemoryScheduledApprovalRunnerV1({
+      principalResolver: principalResolver(ctx),
+      catalog,
+      router,
+      settings: runtimeSettings,
+      evaluators: approvalReviewEvaluators,
+      maxCandidates: config.approvalMaxCandidates ?? 100,
+      minimumConfidence: config.approvalMinimumConfidence ?? 0.9,
+    })
+    ctx.effect(
+      () => approvalRunners.register(governedApprovalRunner),
+      'dsh-mmem: governed scheduled approval runner',
+    )
+    if (config.approvalReviewEnabled !== false) {
+      const evaluator = createDshMemoryApprovalReviewEvaluatorV1({
+        driver: createDshAgentApprovalReviewSessionDriverV1(ctx),
+        ...(config.approvalReviewProvider === undefined ? {} : { provider: config.approvalReviewProvider }),
+        ...(config.approvalReviewModel === undefined ? {} : { model: config.approvalReviewModel }),
+        maxTokens: config.approvalReviewMaxTokens ?? 512,
+      })
+      ctx.effect(
+        () => approvalReviewEvaluators.register(evaluator),
+        'dsh-mmem: isolated DSH Agent Session approval evaluator',
+      )
+    }
+  }
+  if (config.settingsPath !== undefined) {
+    const approvalScheduler = createMemoryApprovalSchedulerV1({
+      settings: runtimeSettings,
+      statePath: config.approvalSchedulerPath ?? `${config.settingsPath}.approval-scheduler.json`,
+      runners: approvalRunners,
+      pollIntervalMs: config.approvalPollIntervalMs ?? 60_000,
+      leaseTimeoutMs: config.leaseTimeoutMs ?? 30_000,
+      leaseStaleMs: config.leaseStaleMs ?? 120_000,
+      onError: () => ctx.logger.warn('mistymoon-memory: scheduled approval check failed closed'),
+    })
+    ctx.effect(
+      () => ctx.provide('dshMmemApprovalScheduler', approvalScheduler),
+      'dsh-mmem: local approval scheduler',
+    )
+    ctx.effect(() => approvalScheduler.start(), 'dsh-mmem: cancellable approval scheduler lifecycle')
+  }
   if (archive !== undefined) {
     ctx.effect(() => ctx.provide('mistymoonMemory', archive), 'mistymoon-memory: shared archive')
   }
   if (catalog !== undefined && router !== undefined) {
     ctx.effect(() => ctx.provide('dshMmemSpaceCatalog', catalog), 'dsh-mmem: Memory Space Catalog')
     ctx.effect(() => ctx.provide('dshMmemSpaceRouter', router), 'dsh-mmem: Space Archive Router')
-    const eligibility = ownerEligibility(ctx)
-    const identity = eligibility.trustedLocalOwner?.()
-    if (identity === undefined) throw new Error('memory governance requires a trusted local Owner adapter')
-    const governanceContext: MemoryAccessContextV1 = {
-      version: 1,
-      ownerId: identity.ownerId,
-      authority: identity.authority,
-      scope: COMPANION_SCOPE,
-      channelDisclosure: 'owner-confidential',
-      requestIntent: 'explicit-confidential-recall',
-    }
+    const governanceContext = trustedGovernanceContext(principalResolver(ctx))
     ctx.effect(
       () => ctx.provide(
         'dshMmemSpaceGovernance',
@@ -1886,7 +1983,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   )
   if (archive !== undefined) {
     ctx.effect(
-      () => ctx.provide('mistymoonMemoryGovernance', memoryGovernanceService(ownerEligibility(ctx), archive)),
+      () => ctx.provide('mistymoonMemoryGovernance', memoryGovernanceService(principalResolver(ctx), archive)),
       'mistymoon-memory: loopback governance facade',
     )
     ctx.effect(() => () => archive.dispose(), 'mistymoon-memory: bounded archive disposal')
@@ -1918,13 +2015,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.on('agent/pre-step', async ({ agent }, next): Promise<PreStepDecision> => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
-    const ownerMessages = ownerEligibility(ctx).ownerMessages(agent, decision.messages)
+    const resolver = principalResolver(ctx)
+    const ownerMessages = decision.messages.filter(message => resolver.message(agent, message) !== undefined)
     try {
       if (archive !== undefined && archive.inspection().state !== 'ready') return decision
       const firstOwnerMessage = ownerMessages[0]
       if (firstOwnerMessage === undefined) return decision
       const firstContext = ownerContext(
-        ownerEligibility(ctx).evaluateMessage(agent, firstOwnerMessage),
+        resolver.message(agent, firstOwnerMessage),
         channelDisclosure,
         userText(firstOwnerMessage),
       )
@@ -1939,7 +2037,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         const text = userText(message)
         if (text !== '' && (!('access' in activeMemory) || activeMemory.access === 'read-write')) {
           await activeMemory.observeExplicit({
-            context: ownerContext(ownerEligibility(ctx).evaluateMessage(agent, message), channelDisclosure, text),
+            context: ownerContext(resolver.message(agent, message), channelDisclosure, text),
             sourceMessageId: message.id,
             text,
             memoryKind: 'summary',
@@ -1949,7 +2047,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       const query = ownerMessages.map(userText).filter(Boolean).join('\n')
       if (query === '') return decision
       const context = ownerContext(
-        ownerEligibility(ctx).evaluateMessage(agent, firstOwnerMessage),
+        resolver.message(agent, firstOwnerMessage),
         channelDisclosure,
         query,
       )
@@ -1984,12 +2082,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const provider = extraction.current()
     if (provider === undefined || !turnHasCompletedReply(agent, turn)
       || (archive !== undefined && archive.inspection().state !== 'ready')) return
-    const eligibility = ownerEligibility(ctx)
-    const ownerMessages = currentTurnOwnerMessages(agent, turn, eligibility)
+    const resolver = principalResolver(ctx)
+    const ownerMessages = currentTurnOwnerMessages(agent, turn, resolver)
     for (const message of ownerMessages) {
       const text = userText(message)
       if (text === '') continue
-      const context = ownerContext(eligibility.evaluateMessage(agent, message), channelDisclosure, text)
+      const context = ownerContext(resolver.message(agent, message), channelDisclosure, text)
       const target = archive ?? await router?.resolveSession({
         ownerId: context.ownerId,
         sessionHeader: agent.session.header,

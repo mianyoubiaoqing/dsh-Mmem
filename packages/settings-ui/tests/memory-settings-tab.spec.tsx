@@ -71,6 +71,554 @@ describe('dsh-Mmem Settings tab', () => {
     expect(JSON.stringify(tree?.toJSON())).toContain('space-project-alpha')
   })
 
+  it('applies Owner search and filters within the current DSH Session', async () => {
+    const call = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: 'space-project-alpha',
+          access: 'read-write',
+          bindingRevision: 'binding-search',
+        },
+        management: { schemaVersion: 1, records: [], candidates: [], audit: [] },
+      },
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+
+    const control = (label: string) => tree?.root.find(
+      node => node.props['aria-label'] === `translated:${label}`,
+    )
+    await act(async () => {
+      control('searchQuery')?.props.onChange({ target: { value: 'neutral preference' } })
+      control('memoryKind')?.props.onChange({ target: { value: 'preference' } })
+      control('visibility')?.props.onChange({ target: { value: 'confidential' } })
+      control('candidateStatus')?.props.onChange({ target: { value: 'all' } })
+    })
+    await act(async () => {
+      tree?.root.findByType('form').props.onSubmit({ preventDefault: vi.fn() })
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenLastCalledWith(
+      '/dsh-mmem-settings',
+      'memory/search',
+      {
+        sessionId: 'settings-session',
+        query: 'neutral preference',
+        memoryKind: 'preference',
+        visibility: 'confidential',
+        recordStatus: 'all',
+        candidateStatus: 'all',
+        limit: 200,
+      },
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('renders governed confirmed Memories alongside Candidate results', async () => {
+    const call = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: 'space-project-alpha',
+          access: 'read-write',
+          bindingRevision: 'binding-records',
+        },
+        management: {
+          schemaVersion: 1,
+          records: [{
+            schemaVersion: 2,
+            id: 'memory-confirmed-1',
+            ownerId: 'owner-fixture',
+            scope: { version: 1, kind: 'companion-reality' },
+            observationId: 'observation-record-1',
+            memoryKind: 'preference',
+            createdAt: '2026-08-21T00:01:00.000Z',
+            recordedAt: '2026-08-21T00:00:00.000Z',
+            content: '经治理确认的中性偏好。',
+            visibility: 'personal',
+            sourceMessageId: 'message-record-1',
+            status: 'confirmed',
+          }],
+          candidates: [],
+          audit: [],
+        },
+      },
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+
+    const rendered = JSON.stringify(tree?.toJSON())
+    expect(rendered).toContain('translated:records')
+    expect(rendered).toContain('经治理确认的中性偏好。')
+  })
+
+  it('shows payload-free Candidate provenance in a read-only Binding', async () => {
+    const activeSpace = {
+      spaceId: 'space-project-alpha',
+      access: 'read' as const,
+      bindingRevision: 'binding-source',
+    }
+    const candidate = {
+      schemaVersion: 2 as const,
+      event: 'candidate' as const,
+      id: 'candidate-source-1',
+      ownerId: 'owner-fixture',
+      scope: { version: 1 as const, kind: 'companion-reality' as const },
+      observationId: 'observation-source-1',
+      memoryKind: 'summary' as const,
+      createdAt: '2026-08-21T00:00:00.000Z',
+      recordedAt: '2026-08-21T00:00:00.000Z',
+      content: '带有可审计来源的中性候选。',
+      visibility: 'personal' as const,
+      sourceMessageId: 'message-source-1',
+      status: 'pending' as const,
+    }
+    const call = vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'memory/search') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          management: { schemaVersion: 1, records: [], candidates: [candidate], audit: [] },
+        },
+      }
+      if (endpoint === 'memory/source') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          source: {
+            schemaVersion: 1,
+            entity: 'candidate' as const,
+            id: candidate.id,
+            observation: {
+              id: candidate.observationId,
+              sourceKind: 'dsh-message',
+              sourceId: candidate.sourceMessageId,
+              observedAt: candidate.recordedAt,
+            },
+            sourceCandidateIds: ['candidate-parent-1'],
+          },
+        },
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+    const source = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:viewSource'))
+    if (source === undefined) throw new Error('expected the Candidate source button')
+    await act(async () => {
+      source.props.onClick()
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenLastCalledWith(
+      '/dsh-mmem-settings',
+      'memory/source',
+      { sessionId: 'settings-session', entity: 'candidate', id: candidate.id },
+      undefined,
+    )
+    const rendered = JSON.stringify(tree?.toJSON())
+    expect(rendered).toContain('message-source-1')
+    expect(rendered).toContain('candidate-parent-1')
+  })
+
+  it('edits a pending Candidate through append-only governance', async () => {
+    const activeSpace = {
+      spaceId: 'space-project-alpha',
+      access: 'read-write' as const,
+      bindingRevision: 'binding-edit',
+    }
+    const candidate = {
+      schemaVersion: 2 as const,
+      event: 'candidate' as const,
+      id: 'candidate-edit-1',
+      ownerId: 'owner-fixture',
+      scope: { version: 1 as const, kind: 'companion-reality' as const },
+      observationId: 'observation-edit-1',
+      memoryKind: 'summary' as const,
+      createdAt: '2026-08-21T00:00:00.000Z',
+      recordedAt: '2026-08-21T00:00:00.000Z',
+      content: '编辑前的中性候选。',
+      visibility: 'personal' as const,
+      sourceMessageId: 'message-edit-1',
+      status: 'pending' as const,
+    }
+    const call = vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'memory/search') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          management: { schemaVersion: 1, records: [], candidates: [candidate], audit: [] },
+        },
+      }
+      if (endpoint === 'memory/edit') return {
+        ok: true as const,
+        value: { schemaVersion: 1, activeSpace, candidate: { ...candidate, id: 'candidate-edit-2' } },
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+    const edit = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:edit'))
+    if (edit === undefined) throw new Error('expected the Candidate edit button')
+    await act(async () => { edit.props.onClick() })
+    const editor = tree?.root.findByProps({ 'aria-label': 'translated:editContent' })
+    const kind = tree?.root.findByProps({ 'aria-label': 'translated:editMemoryKind' })
+    const visibility = tree?.root.findByProps({ 'aria-label': 'translated:editVisibility' })
+    await act(async () => {
+      editor?.props.onChange({ target: { value: '编辑后的中性偏好。' } })
+      kind?.props.onChange({ target: { value: 'preference' } })
+      visibility?.props.onChange({ target: { value: 'confidential' } })
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:editForm' })
+        .props.onSubmit({ preventDefault: vi.fn() })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenCalledWith(
+      '/dsh-mmem-settings',
+      'memory/edit',
+      expect.objectContaining({
+        sessionId: 'settings-session',
+        candidateIds: [candidate.id],
+        content: '编辑后的中性偏好。',
+        memoryKind: 'preference',
+        visibility: 'confidential',
+        requestId: expect.any(String),
+      }),
+      undefined,
+    )
+  })
+
+  it('merges explicitly selected pending Candidates through append-only governance', async () => {
+    const activeSpace = {
+      spaceId: 'space-project-alpha',
+      access: 'read-write' as const,
+      bindingRevision: 'binding-merge',
+    }
+    const first = {
+      schemaVersion: 2 as const,
+      event: 'candidate' as const,
+      id: 'candidate-merge-1',
+      ownerId: 'owner-fixture',
+      scope: { version: 1 as const, kind: 'companion-reality' as const },
+      observationId: 'observation-merge-1',
+      memoryKind: 'summary' as const,
+      createdAt: '2026-08-21T00:00:00.000Z',
+      recordedAt: '2026-08-21T00:00:00.000Z',
+      content: '第一条中性候选。',
+      visibility: 'personal' as const,
+      sourceMessageId: 'message-merge-1',
+      status: 'pending' as const,
+    }
+    const second = {
+      ...first,
+      id: 'candidate-merge-2',
+      observationId: 'observation-merge-2',
+      content: '第二条中性候选。',
+      sourceMessageId: 'message-merge-2',
+    }
+    const call = vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'memory/search') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          management: { schemaVersion: 1, records: [], candidates: [first, second], audit: [] },
+        },
+      }
+      if (endpoint === 'memory/merge') return {
+        ok: true as const,
+        value: { schemaVersion: 1, activeSpace, candidate: { ...first, id: 'candidate-merged' } },
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+    const select = (id: string) => tree?.root.findByProps({
+      'aria-label': `translated:selectForMerge: ${id}`,
+    })
+    await act(async () => {
+      select(first.id)?.props.onChange({ target: { checked: true } })
+      select(second.id)?.props.onChange({ target: { checked: true } })
+    })
+    const merge = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:mergeSelected'))
+    if (merge === undefined) throw new Error('expected merge-selected button')
+    await act(async () => { merge.props.onClick() })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:mergeContent' })
+        .props.onChange({ target: { value: 'Owner 编写的完整合并候选。' } })
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:mergeForm' })
+        .props.onSubmit({ preventDefault: vi.fn() })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenCalledWith(
+      '/dsh-mmem-settings',
+      'memory/merge',
+      expect.objectContaining({
+        sessionId: 'settings-session',
+        candidateIds: [first.id, second.id],
+        content: 'Owner 编写的完整合并候选。',
+        memoryKind: 'summary',
+        visibility: 'personal',
+        requestId: expect.any(String),
+      }),
+      undefined,
+    )
+  })
+
+  it('reports partial success for a batch Candidate decision', async () => {
+    const activeSpace = {
+      spaceId: 'space-project-alpha',
+      access: 'read-write' as const,
+      bindingRevision: 'binding-batch',
+    }
+    const first = {
+      schemaVersion: 2 as const,
+      event: 'candidate' as const,
+      id: 'candidate-batch-1',
+      ownerId: 'owner-fixture',
+      scope: { version: 1 as const, kind: 'companion-reality' as const },
+      observationId: 'observation-batch-1',
+      memoryKind: 'summary' as const,
+      createdAt: '2026-08-21T00:00:00.000Z',
+      recordedAt: '2026-08-21T00:00:00.000Z',
+      content: '可批量处理的中性候选一。',
+      visibility: 'personal' as const,
+      sourceMessageId: 'message-batch-1',
+      status: 'pending' as const,
+    }
+    const second = {
+      ...first,
+      id: 'candidate-batch-2',
+      observationId: 'observation-batch-2',
+      content: '需要单独解决冲突的中性候选二。',
+      sourceMessageId: 'message-batch-2',
+    }
+    const call = vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'memory/search') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          management: { schemaVersion: 1, records: [], candidates: [first, second], audit: [] },
+        },
+      }
+      if (endpoint === 'memory/batch') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          batch: {
+            schemaVersion: 1,
+            results: [
+              { candidateId: first.id, status: 'succeeded' as const },
+              { candidateId: second.id, status: 'failed' as const, code: 'MEMORY_CONFLICT_RESOLUTION_REQUIRED' },
+            ],
+          },
+        },
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+    await act(async () => {
+      for (const candidate of [first, second]) {
+        tree?.root.findByProps({
+          'aria-label': `translated:selectForMerge: ${candidate.id}`,
+        }).props.onChange({ target: { checked: true } })
+      }
+    })
+    const approve = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:batchApprove'))
+    if (approve === undefined) throw new Error('expected batch approve button')
+    await act(async () => {
+      approve.props.onClick()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenCalledWith(
+      '/dsh-mmem-settings',
+      'memory/batch',
+      expect.objectContaining({
+        sessionId: 'settings-session',
+        decisions: [
+          { candidateId: first.id, action: 'approve' },
+          { candidateId: second.id, action: 'approve' },
+        ],
+        requestId: expect.any(String),
+      }),
+      undefined,
+    )
+    const rendered = JSON.stringify(tree?.toJSON())
+    expect(rendered).toContain('MEMORY_CONFLICT_RESOLUTION_REQUIRED')
+    expect(rendered).toContain('translated:partialSuccess')
+  })
+
+  it('explicitly enables scheduled-auto with the observed policy revision', async () => {
+    const activeSpace = {
+      spaceId: 'space-project-alpha',
+      access: 'read-write' as const,
+      bindingRevision: 'binding-policy',
+    }
+    const call = vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'memory/search') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          management: { schemaVersion: 1, records: [], candidates: [], audit: [] },
+        },
+      }
+      if (endpoint === 'settings/get') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          approvalPolicy: { schemaVersion: 1, revision: 0, mode: 'manual' as const },
+        },
+      }
+      if (endpoint === 'settings/approval') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          approvalPolicy: {
+            schemaVersion: 1,
+            revision: 1,
+            mode: 'scheduled-auto' as const,
+            timeZone: 'Asia/Shanghai',
+            localTime: '03:30',
+          },
+        },
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+    const configure = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:configureApproval'))
+    if (configure === undefined) throw new Error('expected approval settings button')
+    await act(async () => {
+      configure.props.onClick()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:approvalMode' })
+        .props.onChange({ target: { value: 'scheduled-auto' } })
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:approvalTimeZone' })
+        .props.onChange({ target: { value: 'Asia/Shanghai' } })
+      tree?.root.findByProps({ 'aria-label': 'translated:approvalLocalTime' })
+        .props.onChange({ target: { value: '03:30' } })
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:approvalForm' })
+        .props.onSubmit({ preventDefault: vi.fn() })
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenCalledWith(
+      '/dsh-mmem-settings',
+      'settings/approval',
+      {
+        sessionId: 'settings-session',
+        expectedRevision: 0,
+        mode: 'scheduled-auto',
+        timeZone: 'Asia/Shanghai',
+        localTime: '03:30',
+      },
+      undefined,
+    )
+  })
+
   it('renders pending Candidates from the governed management projection', async () => {
     const searchResponse = {
       ok: true,

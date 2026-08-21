@@ -481,4 +481,45 @@ describe('dsh-Mmem Settings browser client', () => {
       undefined,
     )
   })
+
+  it('updates approval policy without accepting Owner, Workspace, or settings paths', async () => {
+    const call = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: 'space-project-alpha',
+          access: 'read-write',
+          bindingRevision: 'binding-policy',
+        },
+        approvalPolicy: {
+          schemaVersion: 1,
+          revision: 2,
+          mode: 'scheduled-auto',
+          timeZone: 'Asia/Shanghai',
+          localTime: '03:30',
+        },
+      },
+    })
+    const client = createMemorySettingsClient({ rpc: { call }, sessionId: 'settings-session' })
+
+    await expect(client.updateApprovalPolicy({
+      expectedRevision: 1,
+      mode: 'scheduled-auto',
+      timeZone: 'Asia/Shanghai',
+      localTime: '03:30',
+    })).resolves.toMatchObject({ approvalPolicy: { revision: 2, mode: 'scheduled-auto' } })
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      '/dsh-mmem-settings',
+      'settings/approval',
+      {
+        sessionId: 'settings-session',
+        expectedRevision: 1,
+        mode: 'scheduled-auto',
+        timeZone: 'Asia/Shanghai',
+        localTime: '03:30',
+      },
+      undefined,
+    )
+  })
 })

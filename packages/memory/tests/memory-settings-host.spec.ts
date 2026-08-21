@@ -6,7 +6,7 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import * as IdentityPlugin from '@mistymoon/dsh-identity'
+import * as PrincipalLocalPlugin from '../src/principal-local.js'
 import { describe, expect, it } from 'vitest'
 import * as MemoryPlugin from '../src/index.js'
 import * as MemorySettingsHost from '../src/settings-host.js'
@@ -43,10 +43,11 @@ describe('dsh-Mmem Settings Host RPC', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+  await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, {
       spaceCatalogPath: join(root, 'catalog.json'),
       spacesRoot: join(root, 'spaces'),
+      settingsPath: join(root, 'settings', 'settings.json'),
     })
     await ctx.plugin(MemorySettingsHost)
     const cwd = 'D:\\workspaces\\project-alpha'
@@ -80,6 +81,56 @@ describe('dsh-Mmem Settings Host RPC', () => {
       options: { authority: 'loopback' },
     })
     if (registration === undefined) throw new Error('expected the Settings RPC registration')
+    await expect(registration.handler('settings/get', {
+      sessionId: String(session.id),
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: { spaceId: space.id, bindingRevision: binding.revision },
+        approvalPolicy: { schemaVersion: 1, revision: 0, mode: 'manual' },
+      },
+    })
+    await expect(registration.handler('settings/approval', {
+      sessionId: String(session.id),
+      expectedRevision: 0,
+      mode: 'scheduled-auto',
+      timeZone: 'Asia/Shanghai',
+      localTime: '03:30',
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: { spaceId: space.id, bindingRevision: binding.revision },
+        approvalPolicy: {
+          schemaVersion: 1,
+          revision: 1,
+          mode: 'scheduled-auto',
+          timeZone: 'Asia/Shanghai',
+          localTime: '03:30',
+        },
+      },
+    })
+    const readOnlySpace = await ctx.dshMmemSpaceCatalog.createSpace({
+      ownerId: 'owner-fixture',
+      name: 'Read Only Policy Receipt',
+    })
+    await ctx.dshMmemSpaceCatalog.bindDshWorkspace({
+      ownerId: 'owner-fixture',
+      sessionHeader: session.header,
+      spaceId: readOnlySpace.id,
+      access: 'read',
+      defaultWrite: false,
+    })
+    await expect(registration.handler('settings/approval', {
+      sessionId: String(session.id),
+      requestedSpaceId: readOnlySpace.id,
+      expectedRevision: 1,
+      mode: 'manual',
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'bad-request', message: expect.stringContaining('read-write') },
+    })
     await expect(registration.handler('candidates/list', {
       sessionId: String(session.id),
       ownerId: 'browser-must-not-select-owner',

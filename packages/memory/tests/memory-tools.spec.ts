@@ -7,7 +7,7 @@ import { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { type ToolExecutionResult } from '@deepseek-ai/dsh-tools'
-import * as IdentityPlugin from '@mistymoon/dsh-identity'
+import * as PrincipalLocalPlugin from '../src/principal-local.js'
 import { describe, expect, it } from 'vitest'
 import * as MemoryPlugin from '../src/index.js'
 import { PERSONAL_COMPANION_ACCESS } from './fixtures.js'
@@ -77,7 +77,7 @@ describe('MistyMoon memory tools', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+  await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, {
       spaceCatalogPath: join(root, 'catalog.json'),
       spacesRoot: join(root, 'spaces'),
@@ -121,7 +121,7 @@ describe('MistyMoon memory tools', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, { path, recallLimit: 4 })
     const child = toolAgent(ctx, 'memory-child-tool-agent', 1)
 
@@ -148,7 +148,7 @@ describe('MistyMoon memory tools', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, { path, recallLimit: 4 })
     const agent = toolAgent(ctx, 'memory-owner-tools-agent')
 
@@ -182,7 +182,7 @@ describe('MistyMoon memory tools', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, { path, recallLimit: 4 })
     const agent = toolAgent(ctx, 'memory-owner-review-agent')
 

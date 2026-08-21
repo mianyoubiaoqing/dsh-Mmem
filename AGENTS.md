@@ -18,6 +18,8 @@
 - 测试只使用中性生成数据和系统临时目录。
 - 未经 Owner 明确授权，不 commit、push、创建 Release、发布 npm 包、迁移真实档案或启用远端 Provider。
 - 发布前必须完成许可证、第三方资产、构建产物和隐私审计。
+- 根 workspace 与内部开发包保持 `private: true`；唯一公开安装面是单一 `@mistymoon/dsh-mmem` bundle，不能要求用户安装未发布的 workspace 包。
+- `pnpm pack:npm` 只生成并审计 `.tgz`。npm 登录、token、`npm publish`、dist-tag 与撤回始终由 Owner 手动执行，Agent 不代为发布。
 
 ## TypeScript 与 DSH
 
@@ -41,3 +43,8 @@
 - 分支默认使用 `codex/` 前缀。
 - 不使用 `git reset --hard`、`git clean` 或覆盖用户改动的命令。
 - 未经明确授权不提交、不推送、不发布。
+
+## DSH 兼容基线
+
+- 当前完整开发检查以 DSH `0.1.0-rc.8` 为基线；公开 peer range 保留已经验证过的 `rc.7`，覆盖 `>=0.1.0-rc.7 <0.1.0`。
+- 扩大 DSH 兼容范围前必须在新版本上实际运行 typecheck、全部测试、构建和 packed smoke，不只修改 manifest。
