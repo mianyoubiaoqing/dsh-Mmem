@@ -47,8 +47,8 @@ if (typeof settingsClient.createMemorySettingsClient !== 'function') {
 if (settingsUi.name !== 'dsh-mmem-settings-ui') {
   throw new Error(`unexpected Memory Settings UI plugin name: ${String(settingsUi.name)}`)
 }
-if (!settingsUiClient.includes("id: \"@mistymoon/dsh-mmem/settings-ui\"")) {
-  throw new Error('built Memory Settings UI client is missing its DSH module-loader id')
+if (!settingsUiClient.includes("id: \"@mistymoon/dsh-mmem\"")) {
+  throw new Error('built Memory Settings UI client is missing its rc.8 package module-loader id')
 }
 
 console.log('dsh-Mmem built plugin smoke passed')

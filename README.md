@@ -2,7 +2,7 @@
 
 `dsh-Mmem` 是一个正在从 MistyMoon 套件拆出的独立 DeepSeek Harness 长期记忆插件工作仓库。目标是提供 Owner 隔离、来源可追溯、可人工审批或按用户时区定时自动审核的治理型记忆，并支持绑定 DSH Workspace、可选择性共享的独立 Memory Spaces，而不是把 Memory 绑定到 RP Persona 或另建 Agent Runtime。
 
-> 当前状态：独立插件 alpha，尚未公开发布，也尚未完成 clean Profile 发行验收。当前 Settings tab 已提供 Session-bound 人工审批、审批策略和 Memory Space 互通配置；Owner 显式启用 `scheduled-auto` 后，本机调度器通过 fresh、无工具的 rc.8 Agent Session 生成建议，并在治理重校验后处理低风险候选。旧 SQLite 迁移已提供显式 plan/apply/rollback，但在正式发行验收前仍不要直接迁移真实档案。
+> 当前状态：独立插件 alpha，尚未公开发布。`0.0.1-alpha.0` 已通过官方 npm `@deepseek-ai/dsh@0.1.0-rc.8` 的 clean Profile 真实浏览器验收；当前 Settings tab 已提供 Session-bound 人工审批、审批策略、Memory Space 首次设置和互通配置。Owner 显式启用 `scheduled-auto` 后，本机调度器通过 fresh、无工具的 rc.8 Agent Session 生成建议，并在治理重校验后处理低风险候选。旧 SQLite 迁移已提供显式 plan/apply/rollback；首次公开 alpha 前仍应只用中性副本演练，不直接迁移唯一真实档案。
 
 ## 当前包含
 
@@ -69,7 +69,7 @@ pnpm check
 pnpm pack:npm
 ```
 
-该命令不会登录或发布 npm。最终 `npm publish <tgz> --access public`、dist-tag 和版本选择只由 Owner 手动执行。当前仍需在公开发布前完成 clean DSH Profile UI smoke、许可证复核与发行验收。
+该命令不会登录或发布 npm。最终 `npm publish <tgz> --access public`、dist-tag 和版本选择只由 Owner 手动执行。rc.8 clean Profile UI smoke 与许可证复核记录见 [`research/release-readiness-0.0.1-alpha.0.md`](research/release-readiness-0.0.1-alpha.0.md)；公开发布后仍应从 registry 包在全新 DSH Home 重复验收。
 
 旧 SQLite 到一个已经选定的 Memory Space Archive 的迁移使用四步 CLI。`plan` 只输出数量、路径和摘要，不输出记忆内容；把其返回的 token、confirmation 和 digest 原样传给 `apply`。迁移后先运行 `rehearse-rollback`，只有报告 `applicable: true` 时才可用结果中的 confirmation 执行 `rollback`：
 
@@ -82,11 +82,18 @@ pnpm migrate:standalone -- rollback <rollback-token> <rollback-confirmation>
 
 这些命令不创建 DSH Workspace 或 Memory Space；目标路径必须来自 Owner 已选定的 Space。迁移应在 DSH 停止写入该 Archive 时运行。
 
+## 兼容与调研
+
+- 完整开发与发行基线：DSH `0.1.0-rc.8`。
+- 公开兼容声明：`>=0.1.0-rc.7 <0.1.0`；后续 rc 必须重跑完整矩阵后再扩大。
+- 竞品、差异化与采用判断：[`research/dsh-memory-plugin-ecosystem-2026-08-21.md`](research/dsh-memory-plugin-ecosystem-2026-08-21.md)。
+- Owner 手动上传 npm 前的验收与许可证清单：[`research/release-readiness-0.0.1-alpha.0.md`](research/release-readiness-0.0.1-alpha.0.md)。
+
 ## 下一步
 
-1. 用统一 `GovernedMemoryV1` Interface 深化 Archive/governance/recall Module。
-2. 完成 clean DSH Profile UI smoke、许可证复核与发行验收。
-3. 完成 clean DSH Profile UI smoke、许可证复核与发行验收后，再由 Owner 手动上传 npm tarball。
+1. 由 Owner 审阅并依次合并堆叠 PR。
+2. 合并后从最终主分支重新生成 tarball、核对 digest 与版本。
+3. 只由 Owner 手动上传 npm；上传后从 registry 包在全新 DSH Home 重复 clean Profile smoke。
 
 ## 许可证
 

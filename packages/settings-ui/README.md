@@ -8,4 +8,4 @@ For a live Session whose DSH Workspace has no Active Space, the same tab exposes
 
 The Host marker owns no Memory data or RPC behavior. The Settings Host shipped as `@mistymoon/dsh-mmem/settings-host` remains the loopback transport authority, and `MemorySpaceGovernanceResolverV1` remains the only route to an Active Space.
 
-Policy persistence does not itself start scheduled work. The local scheduler and AI review runner remain follow-up runtime Modules.
+Policy persistence is observed by the bundled cancellable local scheduler. The scheduler only runs after the Owner explicitly saves `scheduled-auto`; the bundled rc.8 Evaluator creates fresh no-tool DSH Agent Sessions, while the governance runner retains all Archive mutation authority and revalidates trusted facts before any low-risk automatic decision.
