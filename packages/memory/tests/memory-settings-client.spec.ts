@@ -522,4 +522,115 @@ describe('dsh-Mmem Settings browser client', () => {
       undefined,
     )
   })
+
+  it('replaces sharing policy without accepting Owner or DSH Workspace identity', async () => {
+    const call = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: 'space-target',
+          access: 'read-write',
+          bindingRevision: 'binding-sharing',
+        },
+        spaces: [
+          {
+            schemaVersion: 1,
+            id: 'space-source',
+            ownerId: 'owner-fixture',
+            name: 'Source',
+            createdAt: '2026-08-21T00:00:00.000Z',
+          },
+          {
+            schemaVersion: 1,
+            id: 'space-target',
+            ownerId: 'owner-fixture',
+            name: 'Target',
+            createdAt: '2026-08-21T00:00:00.000Z',
+          },
+        ],
+        sharingPolicy: {
+          schemaVersion: 1,
+          ownerId: 'owner-fixture',
+          revision: 'sharing-v2',
+          mode: 'selective',
+          grants: [{
+            id: 'grant-source-to-target',
+            sourceSpaceId: 'space-source',
+            targetSpaceId: 'space-target',
+            memoryKinds: ['summary'],
+            visibilities: ['personal'],
+          }],
+          federations: [],
+        },
+      },
+    })
+    const client = createMemorySettingsClient({ rpc: { call }, sessionId: 'settings-session' })
+    const update = {
+      expectedRevision: 'sharing-v1',
+      mode: 'selective' as const,
+      grants: [{
+        id: 'grant-source-to-target',
+        sourceSpaceId: 'space-source',
+        targetSpaceId: 'space-target',
+        memoryKinds: ['summary' as const],
+        visibilities: ['personal' as const],
+      }],
+      federations: [],
+    }
+
+    await expect(client.replaceSharingPolicy(update)).resolves.toMatchObject({
+      sharingPolicy: { revision: 'sharing-v2', mode: 'selective' },
+    })
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      '/dsh-mmem-settings',
+      'sharing/replace',
+      { sessionId: 'settings-session', ...update },
+      undefined,
+    )
+  })
+
+  it('binds a Space to the Host-resolved current DSH Workspace without browser cwd', async () => {
+    const call = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        spaces: [{
+          schemaVersion: 1,
+          id: 'space-project',
+          ownerId: 'owner-fixture',
+          name: 'Project',
+          createdAt: '2026-08-21T00:00:00.000Z',
+        }],
+        bindings: [{
+          schemaVersion: 1,
+          ownerId: 'owner-fixture',
+          dshWorkspaceCwd: 'D:\\workspaces\\project',
+          spaceId: 'space-project',
+          access: 'read-write',
+          defaultWrite: true,
+          revision: 'binding-v1',
+          createdAt: '2026-08-21T00:01:00.000Z',
+        }],
+      },
+    })
+    const client = createMemorySettingsClient({ rpc: { call }, sessionId: 'settings-session' })
+
+    await expect(client.bindCurrentDshWorkspace({
+      spaceId: 'space-project',
+      access: 'read-write',
+      defaultWrite: true,
+    })).resolves.toMatchObject({ bindings: [{ spaceId: 'space-project' }] })
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      '/dsh-mmem-settings',
+      'spaces/bind',
+      {
+        sessionId: 'settings-session',
+        spaceId: 'space-project',
+        access: 'read-write',
+        defaultWrite: true,
+      },
+      undefined,
+    )
+  })
 })

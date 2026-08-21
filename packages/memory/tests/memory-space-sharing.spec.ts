@@ -197,4 +197,42 @@ describe('MemorySpaceSharingCatalogV1', () => {
       mode: 'isolated',
     })
   })
+
+  it('rejects ambiguous duplicate grants between the same Source and Target Spaces', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-duplicate-grants-'))
+    const ids = ['space-source', 'space-target']
+    const spaces = await openMemorySpaceCatalog({
+      path: join(root, 'spaces.json'),
+      createId: () => ids.shift() ?? 'unexpected-space',
+    })
+    await spaces.createSpace({ ownerId: 'owner-fixture', name: 'Source' })
+    await spaces.createSpace({ ownerId: 'owner-fixture', name: 'Target' })
+    const sharing = await openMemorySpaceSharingCatalog({
+      path: join(root, 'sharing.json'),
+      spaces,
+    })
+
+    await expect(sharing.replacePolicy({
+      ownerId: 'owner-fixture',
+      expectedRevision: '0',
+      mode: 'selective',
+      grants: [
+        {
+          id: 'grant-preference',
+          sourceSpaceId: 'space-source',
+          targetSpaceId: 'space-target',
+          memoryKinds: ['preference'],
+          visibilities: ['personal'],
+        },
+        {
+          id: 'grant-summary',
+          sourceSpaceId: 'space-source',
+          targetSpaceId: 'space-target',
+          memoryKinds: ['summary'],
+          visibilities: ['personal'],
+        },
+      ],
+      federations: [],
+    })).rejects.toMatchObject({ code: 'MEMORY_SPACE_SHARE_GRANT_INVALID' })
+  })
 })

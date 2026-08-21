@@ -10,6 +10,10 @@ import type {
   MemorySpaceCatalogV1,
   ResolveActiveSpaceRequestV1,
 } from './space-catalog.js'
+import type {
+  MemorySpaceSharingCatalogV1,
+  SpaceRecallAuthorizationV1,
+} from './space-sharing.js'
 
 /** Active Space facade that keeps Archive selection outside model-controlled inputs. */
 export interface ActiveSpaceMemoryV1 extends Omit<CompanionMemoryArchive, 'dispose' | 'retrieve'> {
@@ -24,6 +28,8 @@ export interface ActiveSpaceMemoryV1 extends Omit<CompanionMemoryArchive, 'dispo
 /** One recalled item retaining the authoritative Memory Space of its record. */
 export interface MemorySpaceRecallItemV1 extends MemoryRecallItemV1 {
   sourceSpaceId: string
+  /** Present only for read-only Borrowed Recall from a non-Active Source Space. */
+  authorization?: SpaceRecallAuthorizationV1
 }
 
 /** Model-visible recall receipt with exact Active Space and Binding revision. */
@@ -50,6 +56,7 @@ export interface MemorySpaceArchiveRouterV1 {
 /** Catalog and private root required by the Space Archive Router. */
 export interface MemorySpaceArchiveRouterOptions {
   catalog: MemorySpaceCatalogV1
+  sharing?: MemorySpaceSharingCatalogV1
   spacesRoot: string
 }
 
@@ -94,6 +101,7 @@ class SpaceArchiveRouter implements MemorySpaceArchiveRouterV1 {
 
   constructor(
     private readonly catalog: MemorySpaceCatalogV1,
+    private readonly sharing: MemorySpaceSharingCatalogV1 | undefined,
     private readonly spacesRoot: string,
     private readonly openArchive: MemorySpaceArchiveOpener,
   ) {}
@@ -131,7 +139,74 @@ class SpaceArchiveRouter implements MemorySpaceArchiveRouterV1 {
       },
       retrieve: async input => {
         read(input)
-        const snapshot = await archive.retrieve(input)
+        const limit = input.limit ?? 8
+        const maxCharacters = input.maxCharacters ?? 4_000
+        if (!Number.isSafeInteger(limit) || limit < 0 || limit > 100) {
+          throw new TypeError('retrieval limit must be from 0 through 100')
+        }
+        if (!Number.isSafeInteger(maxCharacters) || maxCharacters < 1 || maxCharacters > 100_000) {
+          throw new TypeError('retrieval maxCharacters must be from 1 through 100000')
+        }
+        const overfetch = { ...input, limit: 100, maxCharacters: 100_000 }
+        const snapshot = await archive.retrieve(overfetch)
+        const localItems: MemorySpaceRecallItemV1[] = snapshot.items.map(item => ({
+          ...item,
+          sourceSpaceId: resolution.spaceId,
+        }))
+        const authorized = this.sharing === undefined
+          ? undefined
+          : await this.sharing.resolveRecallSources({
+              ownerId,
+              activeSpaceId: resolution.spaceId,
+            })
+        const settled = authorized === undefined
+          ? []
+          : await Promise.allSettled(authorized.sources.map(async source => {
+              const sourceArchive = await this.#archive(source.sourceSpaceId)
+              const sourceSnapshot = await sourceArchive.retrieve({
+                ...overfetch,
+                ...(source.authorization.kind === 'space-share-grant'
+                  ? {
+                      memoryKinds: input.memoryKinds === undefined
+                        ? source.authorization.memoryKinds
+                        : source.authorization.memoryKinds.filter(kind => input.memoryKinds?.includes(kind)),
+                      visibilities: input.visibilities === undefined
+                        ? source.authorization.visibilities
+                        : source.authorization.visibilities.filter(visibility => input.visibilities?.includes(visibility)),
+                    }
+                  : {}),
+              })
+              return sourceSnapshot.items.map(item => ({
+                ...item,
+                sourceSpaceId: source.sourceSpaceId,
+                authorization: source.authorization,
+              }))
+            }))
+        const currentAuthorization = authorized === undefined
+          ? undefined
+          : await this.sharing?.resolveRecallSources({
+              ownerId,
+              activeSpaceId: resolution.spaceId,
+            })
+        const authorizationStable = authorized !== undefined
+          && currentAuthorization !== undefined
+          && JSON.stringify(currentAuthorization) === JSON.stringify(authorized)
+        const borrowedItems = authorizationStable
+          ? settled.flatMap(result => result.status === 'fulfilled' ? result.value : [])
+          : []
+        const ranked = [...localItems, ...borrowedItems]
+          .toSorted((left, right) => right.score - left.score
+            || right.memory.createdAt.localeCompare(left.memory.createdAt)
+            || left.sourceSpaceId.localeCompare(right.sourceSpaceId)
+            || left.memory.id.localeCompare(right.memory.id))
+        const items: MemorySpaceRecallItemV1[] = []
+        let usedCharacters = 0
+        for (const item of ranked) {
+          if (items.length >= limit) break
+          if (usedCharacters + item.memory.content.length > maxCharacters) continue
+          usedCharacters += item.memory.content.length
+          items.push(item)
+        }
         return {
           ...snapshot,
           activeSpace: {
@@ -139,7 +214,7 @@ class SpaceArchiveRouter implements MemorySpaceArchiveRouterV1 {
             access: resolution.access,
             bindingRevision: resolution.bindingRevision,
           },
-          items: snapshot.items.map(item => ({ ...item, sourceSpaceId: resolution.spaceId })),
+          items,
         }
       },
       list: input => {
@@ -247,5 +322,5 @@ export function createMemorySpaceArchiveRouter(
   if (options.spacesRoot === '' || !isAbsolute(options.spacesRoot)) {
     throw new Error('Memory Space Archive root must be absolute')
   }
-  return new SpaceArchiveRouter(options.catalog, options.spacesRoot, openArchive)
+  return new SpaceArchiveRouter(options.catalog, options.sharing, options.spacesRoot, openArchive)
 }

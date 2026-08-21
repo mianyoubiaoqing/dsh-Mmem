@@ -43,6 +43,22 @@ function assertManifest(manifest) {
   if (manifest.dsh?.bundle?.patch !== './cordis.patch.yml') {
     fail('DSH bundle manifest must point to cordis.patch.yml')
   }
+  if (manifest.exports?.['./client'] !== './lib/settings-ui/client.js') {
+    fail('DSH rc.8 browser discovery requires the root ./client export')
+  }
+  if (manifest.dsh?.client?.platform !== 'web') {
+    fail('DSH rc.8 browser discovery requires dsh.client.platform=web')
+  }
+  const clientInject = manifest.dsh?.client?.inject
+  for (const dependency of [
+    '@deepseek-ai/dsh-client-connection',
+    '@deepseek-ai/dsh-client-locale',
+    '@deepseek-ai/dsh-client-ui-settings-plugins',
+  ]) {
+    if (!Array.isArray(clientInject) || !clientInject.includes(dependency)) {
+      fail(`DSH rc.8 browser discovery is missing client inject ${dependency}`)
+    }
+  }
   const dependencySpecs = Object.values({
     ...manifest.dependencies,
     ...manifest.optionalDependencies,
@@ -150,8 +166,8 @@ try {
     fail('clean install contains a forbidden private path')
   }
   const client = await readFile(join(installedPackage, 'lib', 'settings-ui', 'client.js'), 'utf8')
-  if (!client.includes('id: "@mistymoon/dsh-mmem/settings-ui"')) {
-    fail('browser bundle does not register the public package subpath')
+  if (!client.includes('id: "@mistymoon/dsh-mmem"')) {
+    fail('browser bundle does not register the rc.8 public package id')
   }
 
   execFileSync(
@@ -171,6 +187,7 @@ try {
         '${expectedName}/settings-host',
         '${expectedName}/settings-client',
         '${expectedName}/settings-ui',
+        '${expectedName}/client',
         '${expectedName}/settings-ui/client',
       ]) import.meta.resolve(specifier);
       const [schedule, principal, client, ui] = await Promise.all([

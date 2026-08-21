@@ -8,6 +8,7 @@
       name: '@mistymoon/dsh-mmem'
       config:
         spaceCatalogPath: !!js dshHomePath('dsh-mmem', 'catalog.json')
+        spaceSharingPath: !!js dshHomePath('dsh-mmem', 'sharing.json')
         spacesRoot: !!js dshHomePath('dsh-mmem', 'spaces')
         recallLimit: 8
         settingsPath: !!js dshHomePath('dsh-mmem', 'settings', 'settings.json')
