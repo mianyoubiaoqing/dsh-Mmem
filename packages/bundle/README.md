@@ -2,7 +2,7 @@
 
 `@mistymoon/dsh-mmem` is the single installable npm bundle for the standalone dsh-Mmem plugin. It contains the governed Memory runtime, the Memory-owned local DSH principal Adapter, the loopback Settings Host, and the DSH Web Settings tab in one tarball. Runtime data remains outside the package under the active DSH Home.
 
-This alpha is a development preview. It supports Session-bound governed record/Candidate search, filtering, payload-free provenance, append-only Candidate editing/merge, manual review, partial-success batch decisions, exact DSH Workspace-to-Memory-Space bindings, a versioned `manual`/`scheduled-auto` policy editor, and DST-aware daily due-slot calculation. Saving a policy does not start scheduled work: the scheduler and automatic review runner are not active yet. Cross-Space sharing is also incomplete.
+This alpha is a development preview. It supports Session-bound governed record/Candidate search, filtering, payload-free provenance, append-only Candidate editing/merge, manual review, partial-success batch decisions, exact DSH Workspace-to-Memory-Space bindings, a versioned `manual`/`scheduled-auto` policy editor, and a cancellable DST-aware local scheduler with cross-process lease and daily payload-free receipts. No automatic review runner is bundled yet, so the scheduler cannot decide or mutate Candidates. Cross-Space sharing is also incomplete.
 
 ## Install after publication
 

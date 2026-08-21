@@ -86,6 +86,10 @@
     "./approval-schedule": {
       "types": "./lib/approval-schedule.d.ts",
       "default": "./lib/approval-schedule.js"
+    },
+    "./approval-scheduler": {
+      "types": "./lib/approval-scheduler.d.ts",
+      "default": "./lib/approval-scheduler.js"
     }
   },
   "scripts": {

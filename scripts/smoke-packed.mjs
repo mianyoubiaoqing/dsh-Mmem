@@ -63,6 +63,7 @@ function assertPackedFiles(files) {
     'cordis.patch.yml',
     'lib/memory/index.js',
     'lib/memory/approval-schedule.js',
+    'lib/memory/approval-scheduler.js',
     'lib/memory/principal.js',
     'lib/memory/principal-local.js',
     'lib/memory/settings-host.js',
@@ -157,6 +158,7 @@ try {
       `for (const specifier of [
         '${expectedName}',
         '${expectedName}/approval-schedule',
+        '${expectedName}/approval-scheduler',
         '${expectedName}/principal',
         '${expectedName}/principal-local',
         '${expectedName}/settings-host',

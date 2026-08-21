@@ -49,6 +49,10 @@ import {
   loadMemoryRuntimeSettings,
 } from './runtime-settings.js'
 import {
+  MemoryScheduledApprovalRunnerRegistryV1,
+  createMemoryApprovalSchedulerV1,
+} from './approval-scheduler.js'
+import {
   CandidateExtractionRegistry,
   extractMemoryCandidates,
   type CandidateExtractionRequestV1,
@@ -115,6 +119,7 @@ export * from './space-governance.js'
 export * from './principal.js'
 export * from './approval-policy.js'
 export * from './approval-schedule.js'
+export * from './approval-scheduler.js'
 
 /** Cordis plugin name and durable user-message source id. */
 export const name = 'mistymoon-memory'
@@ -134,6 +139,10 @@ export interface Config {
   recallLimit?: number
   /** Optional private owner settings document read before each recall. */
   settingsPath?: string
+  /** Optional payload-free scheduler state path; defaults adjacent to settingsPath. */
+  approvalSchedulerPath?: string
+  /** Local scheduler policy polling interval. */
+  approvalPollIntervalMs?: number
   /** Maximum time to wait for the cross-process archive lease. */
   leaseTimeoutMs?: number
   /** Age after which an unrefreshed archive lease may be reclaimed. */
@@ -157,6 +166,8 @@ export const Config: z<Config> = z.object({
   spacesRoot: z.string(),
   recallLimit: z.number().step(1).min(1).max(20).default(DEFAULT_RECALL_LIMIT),
   settingsPath: z.string(),
+  approvalSchedulerPath: z.string(),
+  approvalPollIntervalMs: z.number().step(1).min(1_000).max(3_600_000).default(60_000),
   leaseTimeoutMs: z.number().step(1).min(100).max(60_000).default(30_000),
   leaseStaleMs: z.number().step(1).min(5_000).max(600_000).default(120_000),
   disposeTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
@@ -1858,6 +1869,30 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     () => ctx.provide('dshMmemRuntimeSettings', runtimeSettings),
     'dsh-mmem: private runtime settings Manager',
   )
+  if (config.approvalSchedulerPath !== undefined && config.settingsPath === undefined) {
+    throw new TypeError('mistymoon-memory: approvalSchedulerPath requires settingsPath')
+  }
+  const approvalRunners = new MemoryScheduledApprovalRunnerRegistryV1()
+  ctx.effect(
+    () => ctx.provide('dshMmemScheduledApprovalRunners', approvalRunners),
+    'dsh-mmem: scheduled approval runner registry',
+  )
+  if (config.settingsPath !== undefined) {
+    const approvalScheduler = createMemoryApprovalSchedulerV1({
+      settings: runtimeSettings,
+      statePath: config.approvalSchedulerPath ?? `${config.settingsPath}.approval-scheduler.json`,
+      runners: approvalRunners,
+      pollIntervalMs: config.approvalPollIntervalMs ?? 60_000,
+      leaseTimeoutMs: config.leaseTimeoutMs ?? 30_000,
+      leaseStaleMs: config.leaseStaleMs ?? 120_000,
+      onError: () => ctx.logger.warn('mistymoon-memory: scheduled approval check failed closed'),
+    })
+    ctx.effect(
+      () => ctx.provide('dshMmemApprovalScheduler', approvalScheduler),
+      'dsh-mmem: local approval scheduler',
+    )
+    ctx.effect(() => approvalScheduler.start(), 'dsh-mmem: cancellable approval scheduler lifecycle')
+  }
   if (archive !== undefined) {
     ctx.effect(() => ctx.provide('mistymoonMemory', archive), 'mistymoon-memory: shared archive')
   }
