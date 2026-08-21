@@ -1,6 +1,6 @@
 {
   "name": "@mistymoon/dsh-mmem",
-  "version": "0.0.1-alpha.2",
+  "version": "0.0.1-alpha.3",
   "description": "Owner-governed long-term memory bundle for DeepSeek Harness",
   "type": "module",
   "license": "MIT",

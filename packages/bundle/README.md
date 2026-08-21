@@ -2,7 +2,7 @@
 
 `@mistymoon/dsh-mmem` is the single installable npm bundle for the standalone dsh-Mmem plugin: Owner-governed long-term memory for DeepSeek Harness (DSH). It includes the Memory runtime, local DSH principal adapter, loopback Settings Host, and DSH Web Settings tab. Runtime data stays outside the package in the active private DSH Home.
 
-> Current release candidate: `0.0.1-alpha.2`. It is fully verified against DSH `0.1.0-rc.8`. The public peer range retains the previously verified `rc.7`, but the new sidebar and graph surfaces in this candidate have completed full verification only on `rc.8`. Test with neutral or recoverable data before using it for an irreplaceable archive.
+> Current release candidate: `0.0.1-alpha.3`. It is fully verified against DSH `0.1.0-rc.8`. The public peer range retains the previously verified `rc.7`, but the new sidebar and graph surfaces in this candidate have completed full verification only on `rc.8`. Test with neutral or recoverable data before using it for an irreplaceable archive.
 
 ## Install or download
 
@@ -15,7 +15,7 @@ Requirements:
 Install the exact verified version through DSH:
 
 ```powershell
-dsh plugin --profile web add @mistymoon/dsh-mmem@0.0.1-alpha.2
+dsh plugin --profile web add @mistymoon/dsh-mmem@0.0.1-alpha.3
 ```
 
 Follow the alpha dist-tag:
@@ -27,13 +27,13 @@ dsh plugin --profile web add @mistymoon/dsh-mmem@alpha
 Download the package as a `.tgz` without installing it:
 
 ```powershell
-npm pack @mistymoon/dsh-mmem@0.0.1-alpha.2
+npm pack @mistymoon/dsh-mmem@0.0.1-alpha.3
 ```
 
 Integrators who manage their own Cordis/DSH composition can install it as a dependency:
 
 ```powershell
-npm install @mistymoon/dsh-mmem@0.0.1-alpha.2
+npm install @mistymoon/dsh-mmem@0.0.1-alpha.3
 ```
 
 The package declares its DSH composition through `dsh.bundle.patch`, including the Host entries and rc.8-compatible root Web client discovery. A normal DSH plugin installation does not require editing the installed package. Review this package and its `cordis.patch.yml` first because DSH plugins execute inside the Harness process.

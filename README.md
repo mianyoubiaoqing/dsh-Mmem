@@ -4,7 +4,7 @@
 
 本插件只使用 DSH 的公开扩展点。DSH 仍然拥有 Agent Runtime、Session、Workspace、工具、权限和模型路由；dsh-Mmem 不修改 DSH 源码，也不创建与 DSH 平行的 Workspace 身份。
 
-> 当前候选版本是 `@mistymoon/dsh-mmem@0.0.1-alpha.2`。完整开发与发行验收基于 DSH `0.1.0-rc.8`；公开 peer range 继续保留此前验证过的 `rc.7`，但本次新增的侧栏与图谱 UI 只在 `rc.8` 完成了完整验证。建议先在中性测试数据或可恢复副本上试用。
+> 当前候选版本是 `@mistymoon/dsh-mmem@0.0.1-alpha.3`。完整开发与发行验收基于 DSH `0.1.0-rc.8`；公开 peer range 继续保留此前验证过的 `rc.7`，但本次新增的侧栏与图谱 UI 只在 `rc.8` 完成了完整验证。建议先在中性测试数据或可恢复副本上试用。
 
 ## 安装与下载
 
@@ -17,7 +17,7 @@
 普通用户应通过 DSH 插件命令安装已经验收的确切版本：
 
 ```powershell
-dsh plugin --profile web add @mistymoon/dsh-mmem@0.0.1-alpha.2
+dsh plugin --profile web add @mistymoon/dsh-mmem@0.0.1-alpha.3
 ```
 
 希望跟随 alpha dist-tag 时可以使用：
@@ -29,13 +29,13 @@ dsh plugin --profile web add @mistymoon/dsh-mmem@alpha
 如果只想把 npm 包下载为 `.tgz`、暂不安装：
 
 ```powershell
-npm pack @mistymoon/dsh-mmem@0.0.1-alpha.2
+npm pack @mistymoon/dsh-mmem@0.0.1-alpha.3
 ```
 
 自行维护 Cordis/DSH 组合的集成开发者也可以把它作为依赖安装：
 
 ```powershell
-npm install @mistymoon/dsh-mmem@0.0.1-alpha.2
+npm install @mistymoon/dsh-mmem@0.0.1-alpha.3
 ```
 
 公开包已经声明 `dsh.bundle.patch`、Host 入口与 Web client discovery；使用 DSH 插件命令时不需要手工修改已安装的包。插件在 Harness 进程中运行，安装前应先审阅本仓库和包内的 `cordis.patch.yml`。
