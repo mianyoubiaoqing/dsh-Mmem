@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   createMemorySettingsClient,
   type MemoryAssessmentRpcSnapshotV1,
+  type MemoryApprovalSettingsRpcSnapshotV1,
   type MemoryBatchRpcSnapshotV1,
   type MemoryManagementRpcSnapshotV1,
   type MemorySettingsRpcCallerV1,
@@ -48,6 +49,12 @@ interface CandidateMergeDraftV1 {
   visibility: MemoryVisibility
 }
 
+interface ApprovalPolicyDraftV1 {
+  mode: 'manual' | 'scheduled-auto'
+  timeZone: string
+  localTime: string
+}
+
 const MEMORY_KINDS: readonly MemoryKind[] = [
   'preference',
   'biographical',
@@ -89,6 +96,8 @@ function SessionMemorySettingsTab({
   const [mergeSelection, setMergeSelection] = useState<string[]>([])
   const [mergeDraft, setMergeDraft] = useState<CandidateMergeDraftV1>()
   const [batchResult, setBatchResult] = useState<MemoryBatchRpcSnapshotV1['batch']>()
+  const [approvalSettings, setApprovalSettings] = useState<MemoryApprovalSettingsRpcSnapshotV1>()
+  const [approvalDraft, setApprovalDraft] = useState<ApprovalPolicyDraftV1>()
   const [filters, setFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
   const [appliedFilters, setAppliedFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
 
@@ -241,11 +250,64 @@ function SessionMemorySettingsTab({
     )
   }
 
+  const openApprovalSettings = (): void => {
+    if (busy) return
+    setBusy(true)
+    setFailed(false)
+    void client.getApprovalPolicy().then(
+      result => {
+        setBusy(false)
+        setApprovalSettings(result)
+        setApprovalDraft({
+          mode: result.approvalPolicy.mode,
+          timeZone: result.approvalPolicy.mode === 'scheduled-auto'
+            ? result.approvalPolicy.timeZone
+            : Intl.DateTimeFormat().resolvedOptions().timeZone,
+          localTime: result.approvalPolicy.mode === 'scheduled-auto'
+            ? result.approvalPolicy.localTime
+            : '03:00',
+        })
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
+  const saveApprovalSettings = (): void => {
+    if (busy || approvalSettings === undefined || approvalDraft === undefined) return
+    setBusy(true)
+    setFailed(false)
+    const update = approvalDraft.mode === 'manual'
+      ? { expectedRevision: approvalSettings.approvalPolicy.revision, mode: 'manual' as const }
+      : {
+          expectedRevision: approvalSettings.approvalPolicy.revision,
+          mode: 'scheduled-auto' as const,
+          timeZone: approvalDraft.timeZone,
+          localTime: approvalDraft.localTime,
+        }
+    void client.updateApprovalPolicy(update).then(
+      result => {
+        setBusy(false)
+        setApprovalSettings(result)
+        setApprovalDraft(value => value === undefined ? value : { ...value, mode: result.approvalPolicy.mode })
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
   if (failed) return <p role="alert">{t('loadError')}</p>
   if (snapshot === undefined) return <p role="status">{t('loading')}</p>
   return <section className="dsh-mmem-settings">
     <h3>{t('activeSpace')}</h3>
     <p>{snapshot.activeSpace.spaceId} · {snapshot.activeSpace.access}</p>
+    <button type="button" disabled={busy} onClick={openApprovalSettings}>
+      {t('configureApproval')}
+    </button>
     <form onSubmit={(event) => {
       event.preventDefault()
       setAppliedFilters({ ...filters })
@@ -293,6 +355,62 @@ function SessionMemorySettingsTab({
       </select>
       <button type="submit">{t('applyFilters')}</button>
     </form>
+    {approvalSettings === undefined || approvalDraft === undefined ? null : <fieldset>
+      <legend>{t('approvalSettings')}</legend>
+      <small>{t('policyRevision')}: {approvalSettings.approvalPolicy.revision}</small>
+      <form
+        aria-label={t('approvalForm')}
+        onSubmit={(event) => {
+          event.preventDefault()
+          saveApprovalSettings()
+        }}
+      >
+        <select
+          aria-label={t('approvalMode')}
+          value={approvalDraft.mode}
+          onChange={event => {
+            setApprovalDraft(value => value === undefined
+              ? value
+              : { ...value, mode: event.target.value as ApprovalPolicyDraftV1['mode'] })
+          }}
+        >
+          <option value="manual">manual</option>
+          <option value="scheduled-auto">scheduled-auto</option>
+        </select>
+        {approvalDraft.mode === 'scheduled-auto' ? <>
+          <input
+            type="text"
+            aria-label={t('approvalTimeZone')}
+            value={approvalDraft.timeZone}
+            onChange={event => {
+              setApprovalDraft(value => value === undefined ? value : { ...value, timeZone: event.target.value })
+            }}
+          />
+          <input
+            type="time"
+            aria-label={t('approvalLocalTime')}
+            value={approvalDraft.localTime}
+            onChange={event => {
+              setApprovalDraft(value => value === undefined ? value : { ...value, localTime: event.target.value })
+            }}
+          />
+        </> : null}
+        <button
+          type="submit"
+          disabled={busy || snapshot.activeSpace.access !== 'read-write'
+            || (approvalDraft.mode === 'scheduled-auto'
+              && (approvalDraft.timeZone.trim() === '' || approvalDraft.localTime === ''))}
+        >{t('saveApproval')}</button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setApprovalSettings(undefined)
+            setApprovalDraft(undefined)
+          }}
+        >{t('cancel')}</button>
+      </form>
+    </fieldset>}
     <fieldset>
       <legend>{t('records')}</legend>
       {snapshot.management.records.length === 0

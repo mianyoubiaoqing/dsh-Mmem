@@ -2,7 +2,7 @@
 
 `dsh-Mmem` 是一个正在从 MistyMoon 套件拆出的独立 DeepSeek Harness 长期记忆插件工作仓库。目标是提供 Owner 隔离、来源可追溯、可人工审批或按用户时区定时自动审核的治理型记忆，并支持绑定 DSH Workspace、可选择性共享的独立 Memory Spaces，而不是把 Memory 绑定到 RP Persona 或另建 Agent Runtime。
 
-> 当前状态：迁移基线，尚未公开发布，也尚未完成通用身份 Adapter、完整管理型 Settings UI 和定时 AI 审批。当前 Settings tab 已提供 Session-bound 人工候选审批 MVP；不要把此目录直接用于真实档案迁移。
+> 当前状态：迁移基线，尚未公开发布，也尚未完成本机调度器、AI 审核 Adapter 和正式迁移工具。当前 Settings tab 已提供 Session-bound 人工候选审批与审批策略配置；不要把此目录直接用于真实档案迁移。
 
 ## 当前包含
 
@@ -18,7 +18,8 @@
 - 第五阶段 Browser RPC client：独立 `@mistymoon/dsh-memory/settings-client` 固定连接 Memory-owned channel，只从 DSH UI 接受 live `sessionId` 与可选已绑定 Space；它校验所有 Host 响应，并为审批、编辑、合并和批量操作生成幂等 request ID。
 - 第六阶段 Settings 管理 UI：从 DSH 公共 Session list 读取当前 live Session，展示 exact Active Space、正式记忆、候选及 payload-free 来源/lineage，提供受治理的搜索/筛选、append-only Candidate 编辑/合并、人工批准/拒绝和逐项 partial-success 批量治理；冲突候选必须由 Owner 明确选择 keep-both 或 supersede。无 Session 与只读 Binding 均失败关闭。
 - 第七阶段审批策略核心：私有 runtime settings 默认 `manual`；Owner 可用 exact revision 显式切换到带 IANA 时区与 `HH:mm` 本地时间的 `scheduled-auto`，并发陈旧更新失败关闭。此阶段尚未启动调度器或自动审批。
-- 第八阶段策略 RPC：Memory-owned settings Manager 与 loopback Settings Host 通过 live Session/Active Space receipt 暴露策略读取和 exact-revision 更新；browser client 不能提交 Owner、Workspace 或 settings path。策略 UI 和调度副作用仍未启用。
+- 第八阶段策略 RPC：Memory-owned settings Manager 与 loopback Settings Host 通过 live Session/Active Space receipt 暴露策略读取和 exact-revision 更新；browser client 不能提交 Owner、Workspace 或 settings path。
+- 第九阶段策略 UI：Settings tab 可显式选择 `manual` 或带 IANA 时区和本地时间的 `scheduled-auto`，并用已观察到的 exact revision 保存；只读 Active Space Binding 在 UI 与 Host 两层都失败关闭。此阶段仍不启动调度副作用。
 - npm 发布边界：内部 workspace 包继续私有；唯一安装包 `@mistymoon/dsh-mmem` 聚合 Memory、本地 principal Adapter、Settings Host 和 Settings UI，并声明官方 DSH bundle patch。
 
 ## 目录
@@ -64,7 +65,7 @@ pnpm pack:npm
 ## 下一步
 
 1. 用统一 `GovernedMemoryV1` Interface 深化 Archive/governance/recall Module。
-2. 把已版本化的审批策略接入 Session-bound Settings UI，再实现本机调度器；UI 不复制策略校验或治理业务规则。
+2. 实现 timezone-aware due calculation、本机调度生命周期、单实例 lease 与逐日 receipt；UI 不复制策略校验或治理业务规则。
 3. 先发布默认人工审批的独立 MVP，再实现 `scheduled-auto`。
 4. 提供旧 `mistymoon/memory` 到新独立目录的只读 plan、exact digest、备份、Owner confirm、apply 与 rollback rehearsal。
 5. 在已完成的 Catalog、物理隔离、Runtime 路由和 Space-aware Settings governance 上，分阶段实现非传递的有限共享和显式 Federation。

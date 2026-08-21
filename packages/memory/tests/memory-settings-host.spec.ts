@@ -111,6 +111,26 @@ describe('dsh-Mmem Settings Host RPC', () => {
         },
       },
     })
+    const readOnlySpace = await ctx.dshMmemSpaceCatalog.createSpace({
+      ownerId: 'owner-fixture',
+      name: 'Read Only Policy Receipt',
+    })
+    await ctx.dshMmemSpaceCatalog.bindDshWorkspace({
+      ownerId: 'owner-fixture',
+      sessionHeader: session.header,
+      spaceId: readOnlySpace.id,
+      access: 'read',
+      defaultWrite: false,
+    })
+    await expect(registration.handler('settings/approval', {
+      sessionId: String(session.id),
+      requestedSpaceId: readOnlySpace.id,
+      expectedRevision: 1,
+      mode: 'manual',
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'bad-request', message: expect.stringContaining('read-write') },
+    })
     await expect(registration.handler('candidates/list', {
       sessionId: String(session.id),
       ownerId: 'browser-must-not-select-owner',
