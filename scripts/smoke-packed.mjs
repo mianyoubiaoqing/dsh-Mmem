@@ -56,13 +56,14 @@ function assertManifest(manifest) {
 function assertPackedFiles(files) {
   const paths = new Set(files.map(file => file.path.replaceAll('\\', '/')))
   const allowedFiles = new Set(['LICENSE', 'README.md', 'cordis.patch.yml', 'package.json'])
-  const allowedTrees = ['lib/identity/', 'lib/memory/', 'lib/settings-ui/']
+  const allowedTrees = ['lib/memory/', 'lib/settings-ui/']
   for (const required of [
     'LICENSE',
     'README.md',
     'cordis.patch.yml',
-    'lib/identity/index.js',
     'lib/memory/index.js',
+    'lib/memory/principal.js',
+    'lib/memory/principal-local.js',
     'lib/memory/settings-host.js',
     'lib/memory/settings-client.js',
     'lib/settings-ui/index.js',
@@ -154,18 +155,19 @@ try {
       '--eval',
       `for (const specifier of [
         '${expectedName}',
-        '${expectedName}/identity-compat',
+        '${expectedName}/principal',
+        '${expectedName}/principal-local',
         '${expectedName}/settings-host',
         '${expectedName}/settings-client',
         '${expectedName}/settings-ui',
         '${expectedName}/settings-ui/client',
       ]) import.meta.resolve(specifier);
-      const [identity, client, ui] = await Promise.all([
-        import('${expectedName}/identity-compat'),
+      const [principal, client, ui] = await Promise.all([
+        import('${expectedName}/principal-local'),
         import('${expectedName}/settings-client'),
         import('${expectedName}/settings-ui'),
       ]);
-      if (identity.name !== 'mistymoon-identity') throw new Error('invalid identity entry');
+      if (principal.name !== 'dsh-mmem-principal-local') throw new Error('invalid principal Adapter entry');
       if (typeof client.createMemorySettingsClient !== 'function') throw new Error('invalid Settings client entry');
       if (ui.name !== 'dsh-mmem-settings-ui') throw new Error('invalid Settings UI entry');`,
     ],

@@ -7,7 +7,7 @@
 ## 当前包含
 
 - MistyMoon commit `69ea9809079007ab0bff6abfa58c8cd3483f8044` 中已提交的 Memory 核心、测试和维护脚本。
-- 当前测试暂需的 Owner Eligibility 实现，后续会替换为 Memory 自己拥有的 `MemoryPrincipalResolver` Interface 与 loopback/MistyMoon Adapters。
+- Memory 自己拥有的 `MemoryPrincipalResolverV1` Interface 与本地 DSH Host Adapter；旧 `mistymoonOwnerEligibility` 依赖已移除。
 - v2 transaction JSONL Archive、lease、checkpoint、quarantine、显式 migration/recovery。
 - Owner/authority/scope/visibility/source lineage、候选审核、冲突/supersession、BM25 recall 与 lifecycle。
 - Memory Space、DSH Workspace Binding 与完全隔离/有限互通/Federation 内完全互通的领域提案。
@@ -17,7 +17,7 @@
 - 第四阶段 Memory-owned Host：独立 `@mistymoon/dsh-memory/settings-host` 在 loopback-only RPC channel 上接受 live DSH `sessionId`，由 Host 取得不可变 `SessionHeader`；已支持 Active Space Candidate 的列出、人工批准/拒绝、搜索、来源、冲突评估、编辑、合并和批量治理，浏览器不能提交 `ownerId` 或 `cwd`。
 - 第五阶段 Browser RPC client：独立 `@mistymoon/dsh-memory/settings-client` 固定连接 Memory-owned channel，只从 DSH UI 接受 live `sessionId` 与可选已绑定 Space；它校验所有 Host 响应，并为审批、编辑、合并和批量操作生成幂等 request ID。
 - 第六阶段 Settings 管理 UI：从 DSH 公共 Session list 读取当前 live Session，展示 exact Active Space、正式记忆、候选及 payload-free 来源/lineage，提供受治理的搜索/筛选、append-only Candidate 编辑/合并、人工批准/拒绝和逐项 partial-success 批量治理；冲突候选必须由 Owner 明确选择 keep-both 或 supersede。无 Session 与只读 Binding 均失败关闭。
-- npm 发布边界：内部 workspace 包继续私有；唯一安装包 `@mistymoon/dsh-mmem` 聚合 Memory、临时 identity Adapter、Settings Host 和 Settings UI，并声明官方 DSH bundle patch。
+- npm 发布边界：内部 workspace 包继续私有；唯一安装包 `@mistymoon/dsh-mmem` 聚合 Memory、本地 principal Adapter、Settings Host 和 Settings UI，并声明官方 DSH bundle patch。
 
 ## 目录
 
@@ -26,7 +26,6 @@ dsh-Mmem/
 ├─ CONTEXT.md      Memory Space、Scope、Binding 与共享的统一领域词汇
 ├─ packages/
 │  ├─ memory/       当前 Memory implementation 迁移基线
-│  ├─ identity/     临时 Owner Eligibility 兼容实现
 │  ├─ settings-ui/  Session-bound DSH Settings tab 与 browser bundle
 │  └─ bundle/       唯一可发布的 `@mistymoon/dsh-mmem` npm 包
 ├─ scripts/         maintenance 与旧数据 migration CLI
@@ -63,11 +62,10 @@ pnpm pack:npm
 ## 下一步
 
 1. 用统一 `GovernedMemoryV1` Interface 深化 Archive/governance/recall Module。
-2. 用 `MemoryPrincipalResolver` 解除 `mistymoonOwnerEligibility` 字符串依赖。
-3. 在已完成管理能力的 Session-bound Settings UI 上增加策略与调度配置，但不复制治理业务规则。
-4. 先发布默认人工审批的独立 MVP，再实现 `scheduled-auto`。
-5. 提供旧 `mistymoon/memory` 到新独立目录的只读 plan、exact digest、备份、Owner confirm、apply 与 rollback rehearsal。
-6. 在已完成的 Catalog、物理隔离、Runtime 路由和 Space-aware Settings governance 上，分阶段实现非传递的有限共享和显式 Federation。
+2. 在已完成管理能力的 Session-bound Settings UI 上增加策略与调度配置，但不复制治理业务规则。
+3. 先发布默认人工审批的独立 MVP，再实现 `scheduled-auto`。
+4. 提供旧 `mistymoon/memory` 到新独立目录的只读 plan、exact digest、备份、Owner confirm、apply 与 rollback rehearsal。
+5. 在已完成的 Catalog、物理隔离、Runtime 路由和 Space-aware Settings governance 上，分阶段实现非传递的有限共享和显式 Federation。
 
 ## 许可证
 

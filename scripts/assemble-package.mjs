@@ -12,7 +12,7 @@ if (relativeOutput.startsWith('..') || isAbsolute(relativeOutput)) {
 await rm(output, { recursive: true, force: true })
 await mkdir(output, { recursive: true })
 
-for (const name of ['identity', 'memory', 'settings-ui']) {
+for (const name of ['memory', 'settings-ui']) {
   await cp(
     resolve(root, 'packages', name, 'lib'),
     resolve(output, name),

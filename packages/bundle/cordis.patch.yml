@@ -1,6 +1,6 @@
 - insert:
-    - id: dsh-mmem-identity-compat
-      name: '@mistymoon/dsh-mmem/identity-compat'
+    - id: dsh-mmem-principal-local
+      name: '@mistymoon/dsh-mmem/principal-local'
       config:
         ownerId: local-owner
 

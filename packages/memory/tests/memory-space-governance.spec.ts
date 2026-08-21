@@ -5,7 +5,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import * as IdentityPlugin from '@mistymoon/dsh-identity'
+import * as PrincipalLocalPlugin from '../src/principal-local.js'
 import { describe, expect, it } from 'vitest'
 import * as MemoryPlugin from '../src/index.js'
 import { PERSONAL_COMPANION_ACCESS } from './fixtures.js'
@@ -17,7 +17,7 @@ describe('MemorySpaceGovernanceResolverV1', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+  await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, {
       spaceCatalogPath: join(root, 'catalog.json'),
       spacesRoot: join(root, 'spaces'),
@@ -75,7 +75,7 @@ describe('MemorySpaceGovernanceResolverV1', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, {
       spaceCatalogPath: join(root, 'catalog.json'),
       spacesRoot: join(root, 'spaces'),
@@ -132,7 +132,7 @@ describe('MemorySpaceGovernanceResolverV1', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, {
       spaceCatalogPath: join(root, 'catalog.json'),
       spacesRoot: join(root, 'spaces'),
@@ -152,7 +152,7 @@ describe('MemorySpaceGovernanceResolverV1', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(IdentityPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, {
       spaceCatalogPath: join(root, 'catalog.json'),
       spacesRoot: join(root, 'spaces'),
