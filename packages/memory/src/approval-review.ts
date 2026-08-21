@@ -26,7 +26,43 @@ export interface MemoryApprovalReviewRequestV1 {
   bindingRevision: string
   candidate: Readonly<MemoryCandidate>
   assessment: Readonly<MemoryConflictAssessmentV1>
+  /** Required user-visible Source Turn evidence for model-compressed summary Candidates. */
+  turnEvidence?: string
   signal: AbortSignal
+}
+
+const MAX_SUMMARY_REVIEW_EVIDENCE_CHARACTERS = 32_000
+
+function modelCompressedSummary(candidate: MemoryCandidate): boolean {
+  return candidate.memoryKind === 'summary'
+    && candidate.extraction?.providerId === 'dsh-turn-summary'
+    && candidate.extraction.receipt.kind === 'dsh-session'
+}
+
+function modelSummaryEvidence(
+  archive: { expandTurnEvidence: (input: {
+    context: MemoryAccessContextV1
+    candidateId: string
+    cursor?: number
+    maxCharacters?: number
+  }) => { content: string; nextCursor?: number } },
+  context: MemoryAccessContextV1,
+  candidateId: string,
+): string | undefined {
+  let cursor = 0
+  let content = ''
+  while (content.length < MAX_SUMMARY_REVIEW_EVIDENCE_CHARACTERS) {
+    const page = archive.expandTurnEvidence({
+      context,
+      candidateId,
+      cursor,
+      maxCharacters: Math.min(10_000, MAX_SUMMARY_REVIEW_EVIDENCE_CHARACTERS - content.length),
+    })
+    content += page.content
+    if (page.nextCursor === undefined) return content
+    cursor = page.nextCursor
+  }
+  return undefined
 }
 
 /** Strict recommendation shape; it is never itself authority to mutate Memory. */
@@ -256,6 +292,19 @@ export function createGovernedMemoryScheduledApprovalRunnerV1(
             deferredCandidates += 1
             continue
           }
+          let turnEvidence: string | undefined
+          if (modelCompressedSummary(candidate)) {
+            try {
+              turnEvidence = modelSummaryEvidence(resolved, access, candidate.id)
+            } catch {
+              deferredCandidates += 1
+              continue
+            }
+            if (turnEvidence === undefined) {
+              deferredCandidates += 1
+              continue
+            }
+          }
           let suggestion: MemoryApprovalReviewSuggestionV1
           try {
             suggestion = parseMemoryApprovalReviewSuggestionV1(await evaluator.evaluate({
@@ -266,6 +315,7 @@ export function createGovernedMemoryScheduledApprovalRunnerV1(
               bindingRevision: binding.revision,
               candidate,
               assessment: initialAssessment,
+              ...(turnEvidence === undefined ? {} : { turnEvidence }),
               signal: request.signal,
             }))
           } catch {

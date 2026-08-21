@@ -11,8 +11,22 @@ import {
   type MemoryApprovalPolicyUpdateV1,
   type MemoryApprovalPolicyV1,
 } from './approval-policy.js'
+import {
+  defaultMemoryTurnSummaryPolicyV1,
+  parseMemoryTurnSummaryPolicyUpdateV1,
+  parseMemoryTurnSummaryPolicyV1,
+  type MemoryTurnSummaryPolicyUpdateV1,
+  type MemoryTurnSummaryPolicyV1,
+} from './turn-summary-policy.js'
 
 export type { MemoryApprovalPolicyUpdateV1, MemoryApprovalPolicyV1 } from './approval-policy.js'
+export type { MemoryTurnSummaryPolicyUpdateV1, MemoryTurnSummaryPolicyV1 } from './turn-summary-policy.js'
+
+/** Separate private document so older approval settings remain downgrade-readable. */
+export interface MemoryTurnSummarySettingsV1 {
+  readonly schemaVersion: 1
+  readonly spaces: Readonly<Record<string, MemoryTurnSummaryPolicyV1>>
+}
 
 /** Current private runtime-settings document. */
 export interface MemoryRuntimeSettings {
@@ -34,11 +48,14 @@ export interface MemoryRuntimeSettingsManagerV1 {
   readonly configured: boolean
   get(): Promise<MemoryRuntimeSettings>
   updateApproval(value: unknown): Promise<MemoryRuntimeSettings>
+  getTurnSummary(spaceId: string): Promise<MemoryTurnSummaryPolicyV1>
+  updateTurnSummary(spaceId: string, value: unknown): Promise<MemoryTurnSummaryPolicyV1>
 }
 
 /** Construction options for the private settings Manager. */
 export interface MemoryRuntimeSettingsManagerOptionsV1 {
   path?: string
+  turnSummaryPath?: string
   fallbackRecallLimit: number
 }
 
@@ -64,6 +81,107 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[], 
   const keys = [...expected].toSorted()
   if (actual.length !== keys.length || actual.some((key, index) => key !== keys[index])) {
     throw new Error(`${label} contains missing or unknown fields`)
+  }
+}
+
+function spaceId(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '' || value.length > 512) {
+    throw new TypeError('turn summary Memory Space id must be a bounded non-empty string')
+  }
+  return value.trim()
+}
+
+function parseMemoryTurnSummarySettingsV1(value: unknown): MemoryTurnSummarySettingsV1 {
+  const input = object(value, 'turn summary settings')
+  exactKeys(input, ['schemaVersion', 'spaces'], 'turn summary settings')
+  if (input.schemaVersion !== 1) throw new TypeError('turn summary settings schemaVersion must equal 1')
+  const spaces = object(input.spaces, 'turn summary settings spaces')
+  if (Object.keys(spaces).length > 1_000) throw new TypeError('turn summary settings contain too many Spaces')
+  return {
+    schemaVersion: 1,
+    spaces: Object.fromEntries(Object.entries(spaces).map(([id, policy]) => [
+      spaceId(id),
+      parseMemoryTurnSummaryPolicyV1(policy),
+    ])),
+  }
+}
+
+/** Load the independent per-Space summary-policy document. */
+export async function loadMemoryTurnSummarySettingsV1(path: string): Promise<MemoryTurnSummarySettingsV1> {
+  let source: string
+  try {
+    source = await readFile(path, 'utf8')
+  } catch (error) {
+    if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { schemaVersion: 1, spaces: {} }
+    }
+    throw error
+  }
+  try {
+    return parseMemoryTurnSummarySettingsV1(JSON.parse(source) as unknown)
+  } catch (error) {
+    throw new Error(`turn summary settings are invalid: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+async function saveMemoryTurnSummarySettingsV1(
+  path: string,
+  value: MemoryTurnSummarySettingsV1,
+): Promise<MemoryTurnSummarySettingsV1> {
+  const settings = parseMemoryTurnSummarySettingsV1(value)
+  await mkdir(dirname(path), { recursive: true })
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    await writeFile(temporary, `${JSON.stringify(settings, null, 2)}\n`, 'utf8')
+    await rename(temporary, path)
+  } finally {
+    await rm(temporary, { force: true })
+  }
+  return settings
+}
+
+/** Atomically replace one Space's summary policy at its exact observed revision. */
+export async function updateMemoryTurnSummaryPolicyV1(
+  path: string,
+  requestedSpaceId: string,
+  value: unknown,
+): Promise<MemoryTurnSummaryPolicyV1> {
+  const id = spaceId(requestedSpaceId)
+  const update = parseMemoryTurnSummaryPolicyUpdateV1(value)
+  await mkdir(dirname(path), { recursive: true })
+  const release = await acquireProperLock(path, {
+    realpath: false,
+    stale: 120_000,
+    update: 60_000,
+    retries: { retries: 600, minTimeout: 50, maxTimeout: 50, randomize: false },
+  })
+  try {
+    const current = await loadMemoryTurnSummarySettingsV1(path)
+    const policy = current.spaces[id] ?? defaultMemoryTurnSummaryPolicyV1()
+    if (policy.revision !== update.expectedRevision) {
+      throw new MemoryRuntimeSettingsError(
+        'SETTINGS_REVISION_CONFLICT',
+        `turn summary policy revision changed from ${String(update.expectedRevision)} to ${String(policy.revision)}`,
+      )
+    }
+    const nextRevision = policy.revision + 1
+    if (!Number.isSafeInteger(nextRevision)) throw new Error('turn summary policy revision is exhausted')
+    const next: MemoryTurnSummaryPolicyV1 = update.mode === 'local-deterministic'
+      ? { schemaVersion: 1, revision: nextRevision, mode: 'local-deterministic' }
+      : {
+          schemaVersion: 1,
+          revision: nextRevision,
+          mode: 'dsh-model',
+          ...(update.provider === undefined ? {} : { provider: update.provider }),
+          ...(update.model === undefined ? {} : { model: update.model }),
+        }
+    await saveMemoryTurnSummarySettingsV1(path, {
+      schemaVersion: 1,
+      spaces: { ...current.spaces, [id]: next },
+    })
+    return next
+  } finally {
+    await release()
   }
 }
 
@@ -187,6 +305,8 @@ export async function updateMemoryApprovalPolicy(
 export function createMemoryRuntimeSettingsManager(
   options: MemoryRuntimeSettingsManagerOptionsV1,
 ): MemoryRuntimeSettingsManagerV1 {
+  const turnSummaryPath = options.turnSummaryPath
+    ?? (options.path === undefined ? undefined : `${options.path}.turn-summary.json`)
   return {
     configured: options.path !== undefined,
     async get() {
@@ -207,6 +327,21 @@ export function createMemoryRuntimeSettingsManager(
         )
       }
       return updateMemoryApprovalPolicy(options.path, options.fallbackRecallLimit, value)
+    },
+    async getTurnSummary(requestedSpaceId) {
+      const id = spaceId(requestedSpaceId)
+      if (turnSummaryPath === undefined) return defaultMemoryTurnSummaryPolicyV1()
+      return (await loadMemoryTurnSummarySettingsV1(turnSummaryPath)).spaces[id]
+        ?? defaultMemoryTurnSummaryPolicyV1()
+    },
+    async updateTurnSummary(requestedSpaceId, value) {
+      if (turnSummaryPath === undefined) {
+        throw new MemoryRuntimeSettingsError(
+          'SETTINGS_NOT_CONFIGURED',
+          'turn summary settings require a private settingsPath',
+        )
+      }
+      return updateMemoryTurnSummaryPolicyV1(turnSummaryPath, requestedSpaceId, value)
     },
   }
 }

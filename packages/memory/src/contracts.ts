@@ -105,6 +105,8 @@ export interface MemoryCandidateProposal extends TrustedMemoryRequest {
   validTo?: string
   /** Host-selected user-visible content for a completed top-level DSH turn. */
   turnEvidence?: MemoryTurnEvidenceCapsuleV1
+  /** Host-constructed generation provenance; never accepted from model tool arguments. */
+  extraction?: MemoryCandidate['extraction']
 }
 
 /** Input for resolving one pending candidate. */

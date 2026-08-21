@@ -55,6 +55,14 @@
       "types": "./lib/runtime-settings.d.ts",
       "default": "./lib/runtime-settings.js"
     },
+    "./turn-summary-policy": {
+      "types": "./lib/turn-summary-policy.d.ts",
+      "default": "./lib/turn-summary-policy.js"
+    },
+    "./turn-summary-dsh": {
+      "types": "./lib/turn-summary-dsh.d.ts",
+      "default": "./lib/turn-summary-dsh.js"
+    },
     "./space-catalog": {
       "types": "./lib/space-catalog.d.ts",
       "default": "./lib/space-catalog.js"

@@ -567,6 +567,47 @@ describe('dsh-Mmem Settings browser client', () => {
     )
   })
 
+  it('updates the Active Space turn-summary policy without accepting a Space or credentials', async () => {
+    const call = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: 'space-project-alpha',
+          access: 'read-write',
+          bindingRevision: 'binding-summary-policy',
+        },
+        turnSummaryPolicy: {
+          schemaVersion: 1,
+          revision: 1,
+          mode: 'dsh-model',
+          provider: 'configured-provider',
+          model: 'configured-model',
+        },
+      },
+    })
+    const client = createMemorySettingsClient({ rpc: { call }, sessionId: 'settings-session' })
+
+    await expect(client.updateTurnSummaryPolicy({
+      expectedRevision: 0,
+      mode: 'dsh-model',
+      provider: 'configured-provider',
+      model: 'configured-model',
+    })).resolves.toMatchObject({ turnSummaryPolicy: { revision: 1, mode: 'dsh-model' } })
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      '/dsh-mmem-settings',
+      'summary/update',
+      {
+        sessionId: 'settings-session',
+        expectedRevision: 0,
+        mode: 'dsh-model',
+        provider: 'configured-provider',
+        model: 'configured-model',
+      },
+      undefined,
+    )
+  })
+
   it('replaces sharing policy without accepting Owner or DSH Workspace identity', async () => {
     const call = vi.fn().mockResolvedValue({
       ok: true,

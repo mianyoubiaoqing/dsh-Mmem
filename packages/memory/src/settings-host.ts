@@ -18,6 +18,7 @@ import type {
   MemoryCandidateRevisionRpcSnapshotV1,
   MemoryManagementRpcSnapshotV1,
   MemorySourceRpcSnapshotV1,
+  MemoryTurnSummarySettingsRpcSnapshotV1,
   MemorySpaceSharingSettingsRpcSnapshotV1,
   MemorySpaceSetupRpcSnapshotV1,
 } from './settings-client.js'
@@ -25,7 +26,12 @@ import {
   MemorySpaceGovernanceUnavailableError,
   type MemorySpaceGovernanceSessionV1,
 } from './space-governance.js'
-import { MemoryRuntimeSettingsError, type MemoryApprovalPolicyUpdateV1 } from './runtime-settings.js'
+import {
+  MemoryRuntimeSettingsError,
+  type MemoryApprovalPolicyUpdateV1,
+  type MemoryTurnSummaryPolicyUpdateV1,
+} from './runtime-settings.js'
+import { parseMemoryTurnSummaryPolicyUpdateV1 } from './turn-summary-policy.js'
 import {
   MemorySpaceSharingError,
   type MemorySpaceSharingSettingsV1,
@@ -43,6 +49,7 @@ export type {
   MemoryCandidateRevisionRpcSnapshotV1,
   MemoryManagementRpcSnapshotV1,
   MemorySourceRpcSnapshotV1,
+  MemoryTurnSummarySettingsRpcSnapshotV1,
   MemorySpaceSharingSettingsRpcSnapshotV1,
   MemorySpaceSetupRpcSnapshotV1,
 } from './settings-client.js'
@@ -414,6 +421,42 @@ function memoryApprovalUpdate(value: unknown): MemoryApprovalUpdateInput | undef
   }
 }
 
+type MemoryTurnSummaryUpdateInput = {
+  sessionId: SessionId
+  requestedSpaceId?: string
+  update: MemoryTurnSummaryPolicyUpdateV1
+}
+
+function memoryTurnSummaryUpdate(value: unknown): MemoryTurnSummaryUpdateInput | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  if (typeof input.sessionId !== 'string' || input.sessionId.trim() === ''
+    || (input.requestedSpaceId !== undefined
+      && (typeof input.requestedSpaceId !== 'string' || input.requestedSpaceId.trim() === ''))) return undefined
+  const updateValue = {
+    expectedRevision: input.expectedRevision,
+    mode: input.mode,
+    ...(input.provider === undefined ? {} : { provider: input.provider }),
+    ...(input.model === undefined ? {} : { model: input.model }),
+  }
+  const expectedKeys = [
+    'sessionId', 'expectedRevision', 'mode',
+    ...(input.requestedSpaceId === undefined ? [] : ['requestedSpaceId']),
+    ...(input.provider === undefined ? [] : ['provider']),
+    ...(input.model === undefined ? [] : ['model']),
+  ]
+  if (!exactObject(value, expectedKeys)) return undefined
+  try {
+    return {
+      sessionId: SessionId(input.sessionId),
+      ...(input.requestedSpaceId === undefined ? {} : { requestedSpaceId: input.requestedSpaceId as string }),
+      update: parseMemoryTurnSummaryPolicyUpdateV1(updateValue),
+    }
+  } catch {
+    return undefined
+  }
+}
+
 type MemorySharingUpdateInput = {
   sessionId: SessionId
   requestedSpaceId?: string
@@ -503,6 +546,8 @@ export function apply(ctx: Context): void {
         && endpoint !== 'relationships/list'
         && endpoint !== 'settings/get'
         && endpoint !== 'settings/approval'
+        && endpoint !== 'summary/get'
+        && endpoint !== 'summary/update'
         && endpoint !== 'sharing/get'
         && endpoint !== 'sharing/replace'
         && endpoint !== 'spaces/get'
@@ -521,14 +566,16 @@ export function apply(ctx: Context): void {
         : undefined
       const batch = endpoint === 'memory/batch' ? memoryBatch(payload) : undefined
       const approvalUpdate = endpoint === 'settings/approval' ? memoryApprovalUpdate(payload) : undefined
+      const summaryUpdate = endpoint === 'summary/update' ? memoryTurnSummaryUpdate(payload) : undefined
       const sharingUpdate = endpoint === 'sharing/replace' ? memorySharingUpdate(payload) : undefined
       const spaceCreate = endpoint === 'spaces/create' ? memorySpaceCreate(payload) : undefined
       const spaceBind = endpoint === 'spaces/bind' ? memorySpaceBind(payload) : undefined
       const selection = endpoint === 'candidates/list' || endpoint === 'relationships/list'
         || endpoint === 'settings/get' || endpoint === 'sharing/get'
+        || endpoint === 'summary/get'
         || endpoint === 'spaces/get'
         ? sessionSelection(payload)
-        : decision ?? search ?? source ?? assessment ?? revision ?? batch ?? approvalUpdate ?? sharingUpdate
+        : decision ?? search ?? source ?? assessment ?? revision ?? batch ?? approvalUpdate ?? summaryUpdate ?? sharingUpdate
           ?? spaceCreate ?? spaceBind
       if (selection === undefined) {
         if (endpoint === 'candidates/list' || endpoint === 'settings/get' || endpoint === 'sharing/get') {
@@ -538,6 +585,7 @@ export function apply(ctx: Context): void {
         if (endpoint === 'spaces/create') return badRequest('Memory Space creation request is invalid.')
         if (endpoint === 'spaces/bind') return badRequest('DSH Workspace Binding request is invalid.')
         if (endpoint === 'settings/approval') return badRequest('Memory approval policy update is invalid.')
+        if (endpoint === 'summary/update') return badRequest('Memory turn summary policy update is invalid.')
         if (endpoint === 'memory/search') return badRequest('Memory search filters are invalid.')
         if (endpoint === 'memory/source') return badRequest('Memory source selection is invalid.')
         if (endpoint === 'memory/assess') return badRequest('Memory Candidate assessment selection is invalid.')
@@ -627,6 +675,20 @@ export function apply(ctx: Context): void {
             schemaVersion: 1,
             activeSpace: activeSpaceReceipt(governance),
             approvalPolicy: settings.approvalPolicy,
+          }
+          return { ok: true, value }
+        }
+        if (endpoint === 'summary/get' || summaryUpdate !== undefined) {
+          if (summaryUpdate !== undefined && governance.access !== 'read-write') {
+            return badRequest('Memory turn summary policy updates require a read-write Active Space Binding.')
+          }
+          const policy = summaryUpdate === undefined
+            ? await ctx.dshMmemRuntimeSettings.getTurnSummary(governance.spaceId)
+            : await ctx.dshMmemRuntimeSettings.updateTurnSummary(governance.spaceId, summaryUpdate.update)
+          const value: MemoryTurnSummarySettingsRpcSnapshotV1 = {
+            schemaVersion: 1,
+            activeSpace: activeSpaceReceipt(governance),
+            turnSummaryPolicy: policy,
           }
           return { ok: true, value }
         }

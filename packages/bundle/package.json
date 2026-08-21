@@ -51,6 +51,14 @@
       "types": "./lib/memory/runtime-settings.d.ts",
       "default": "./lib/memory/runtime-settings.js"
     },
+    "./turn-summary-policy": {
+      "types": "./lib/memory/turn-summary-policy.d.ts",
+      "default": "./lib/memory/turn-summary-policy.js"
+    },
+    "./turn-summary-dsh": {
+      "types": "./lib/memory/turn-summary-dsh.d.ts",
+      "default": "./lib/memory/turn-summary-dsh.js"
+    },
     "./space-catalog": {
       "types": "./lib/memory/space-catalog.d.ts",
       "default": "./lib/memory/space-catalog.js"

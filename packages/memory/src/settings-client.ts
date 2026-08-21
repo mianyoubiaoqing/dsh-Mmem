@@ -21,6 +21,11 @@ import {
   type MemoryApprovalPolicyUpdateV1,
   type MemoryApprovalPolicyV1,
 } from './approval-policy.js'
+import {
+  parseMemoryTurnSummaryPolicyV1,
+  type MemoryTurnSummaryPolicyUpdateV1,
+  type MemoryTurnSummaryPolicyV1,
+} from './turn-summary-policy.js'
 import type {
   DshWorkspaceBindingAccessV1,
   DshWorkspaceBindingV1,
@@ -134,6 +139,13 @@ export interface MemoryApprovalSettingsRpcSnapshotV1 {
   approvalPolicy: MemoryApprovalPolicyV1
 }
 
+/** Per-Space Source Turn compression policy bound to the authenticated Active Space. */
+export interface MemoryTurnSummarySettingsRpcSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  turnSummaryPolicy: MemoryTurnSummaryPolicyV1
+}
+
 /** Owner sharing policy and available Spaces bound to one authenticated Active Space. */
 export interface MemorySpaceSharingSettingsRpcSnapshotV1 {
   schemaVersion: 1
@@ -200,6 +212,11 @@ export interface MemorySettingsClientV1 {
     update: MemoryApprovalPolicyUpdateV1,
     signal?: AbortSignal,
   ): Promise<MemoryApprovalSettingsRpcSnapshotV1>
+  getTurnSummaryPolicy(signal?: AbortSignal): Promise<MemoryTurnSummarySettingsRpcSnapshotV1>
+  updateTurnSummaryPolicy(
+    update: MemoryTurnSummaryPolicyUpdateV1,
+    signal?: AbortSignal,
+  ): Promise<MemoryTurnSummarySettingsRpcSnapshotV1>
   getSharingPolicy(signal?: AbortSignal): Promise<MemorySpaceSharingSettingsRpcSnapshotV1>
   replaceSharingPolicy(
     update: Omit<ReplaceMemorySpaceSharingPolicyRequestV1, 'ownerId'>,
@@ -716,6 +733,24 @@ function approvalSettingsSnapshot(value: unknown): MemoryApprovalSettingsRpcSnap
   return value as MemoryApprovalSettingsRpcSnapshotV1
 }
 
+function turnSummarySettingsSnapshot(value: unknown): MemoryTurnSummarySettingsRpcSnapshotV1 {
+  const input = exactObject(
+    value,
+    ['schemaVersion', 'activeSpace', 'turnSummaryPolicy'],
+    'Memory turn summary settings snapshot',
+  )
+  if (input.schemaVersion !== 1) {
+    throw new MemorySettingsClientError('invalid-response', 'Memory turn summary settings have an invalid version')
+  }
+  activeSpaceReceipt(input.activeSpace)
+  try {
+    parseMemoryTurnSummaryPolicyV1(input.turnSummaryPolicy)
+  } catch (error) {
+    throw new MemorySettingsClientError('invalid-response', 'Memory turn summary policy is invalid', { cause: error })
+  }
+  return value as MemoryTurnSummarySettingsRpcSnapshotV1
+}
+
 function memorySpaceProjection(value: unknown): MemorySpaceV1 {
   const input = exactObject(
     value,
@@ -1007,6 +1042,22 @@ export function createMemorySettingsClient(options: MemorySettingsClientOptionsV
         mode: update.mode,
         ...(update.mode === 'scheduled-auto'
           ? { timeZone: update.timeZone, localTime: update.localTime }
+          : {}),
+      }, signal))
+    },
+    async getTurnSummaryPolicy(signal) {
+      return turnSummarySettingsSnapshot(await call('summary/get', selection, signal))
+    },
+    async updateTurnSummaryPolicy(update, signal) {
+      return turnSummarySettingsSnapshot(await call('summary/update', {
+        ...selection,
+        expectedRevision: update.expectedRevision,
+        mode: update.mode,
+        ...(update.mode === 'dsh-model'
+          ? {
+              ...(update.provider === undefined ? {} : { provider: update.provider }),
+              ...(update.model === undefined ? {} : { model: update.model }),
+            }
           : {}),
       }, signal))
     },
