@@ -1,77 +1,109 @@
 # dsh-Mmem
 
-`dsh-Mmem` 是一个正在从 MistyMoon 套件拆出的独立 DeepSeek Harness 长期记忆插件工作仓库。目标是提供 Owner 隔离、来源可追溯、可人工审批或按用户时区定时自动审核的治理型记忆，并支持绑定 DSH Workspace、可选择性共享的独立 Memory Spaces，而不是把 Memory 绑定到 RP Persona 或另建 Agent Runtime。
+`dsh-Mmem` 是面向 [DeepSeek Harness（DSH）](https://www.npmjs.com/package/@deepseek-ai/dsh) 的独立长期记忆插件。它把记忆视为需要治理的数据：每条正式记忆都有 Owner、来源、可见性、修订关系和所属 Memory Space；候选记忆默认等待人工审批，也可以由用户显式开启按本地时区运行的定时自动审核。
 
-> 当前状态：独立插件 alpha，尚未公开发布。`0.0.1-alpha.0` 已通过官方 npm `@deepseek-ai/dsh@0.1.0-rc.8` 的 clean Profile 真实浏览器验收；当前 Settings tab 已提供 Session-bound 人工审批、审批策略、Memory Space 首次设置和互通配置。Owner 显式启用 `scheduled-auto` 后，本机调度器通过 fresh、无工具的 rc.8 Agent Session 生成建议，并在治理重校验后处理低风险候选。旧 SQLite 迁移已提供显式 plan/apply/rollback；首次公开 alpha 前仍应只用中性副本演练，不直接迁移唯一真实档案。
+本插件只使用 DSH 的公开扩展点。DSH 仍然拥有 Agent Runtime、Session、Workspace、工具、权限和模型路由；dsh-Mmem 不修改 DSH 源码，也不创建与 DSH 平行的 Workspace 身份。
 
-## 当前包含
+> 当前版本是公开 alpha：[`@mistymoon/dsh-mmem@0.0.1-alpha.0`](https://www.npmjs.com/package/@mistymoon/dsh-mmem)。完整开发与发行验收基于 DSH `0.1.0-rc.8`；DSH `rc.7` 也完成了独立 clean Profile 的安装和 Web Settings discovery 验证。建议先在中性测试数据或可恢复副本上试用。
 
-- MistyMoon commit `69ea9809079007ab0bff6abfa58c8cd3483f8044` 中已提交的 Memory 核心、测试和维护脚本。
-- Memory 自己拥有的 `MemoryPrincipalResolverV1` Interface 与本地 DSH Host Adapter；旧 `mistymoonOwnerEligibility` 依赖已移除。
-- v2 transaction JSONL Archive、lease、checkpoint、quarantine、显式 migration/recovery。
-- Owner/authority/scope/visibility/source lineage、候选审核、冲突/supersession、BM25 recall 与 lifecycle。
-- Memory Space、DSH Workspace Binding 与完全隔离/有限互通/Federation 内完全互通的领域提案。
-- 第一阶段 `MemorySpaceCatalogV1`：版本化 Space、exact DSH `SessionHeader.cwd` Binding、唯一 Default Write、显式 Active Space 与跨进程 lease。
-- 第二阶段 `MemorySpaceArchiveRouterV1`：每 Space 独立 Archive、DSH pre-step/tool/candidate 路由、只读写入门与 Source Space/Binding recall receipt。
-- 第三阶段 `MemorySpaceGovernanceResolverV1`：Settings Host 只凭 DSH `SessionHeader` 解析 Active Space，Owner 由可信 loopback Adapter 固定；人工审批复用统一治理 facade，只读 Binding 失败关闭，候选不会跨 Space 混列。
-- 第四阶段 Memory-owned Host：独立 `@mistymoon/dsh-memory/settings-host` 在 loopback-only RPC channel 上接受 live DSH `sessionId`，由 Host 取得不可变 `SessionHeader`；已支持 Active Space Candidate 的列出、人工批准/拒绝、搜索、来源、冲突评估、编辑、合并和批量治理，浏览器不能提交 `ownerId` 或 `cwd`。
-- 第五阶段 Browser RPC client：独立 `@mistymoon/dsh-memory/settings-client` 固定连接 Memory-owned channel，只从 DSH UI 接受 live `sessionId` 与可选已绑定 Space；它校验所有 Host 响应，并为审批、编辑、合并和批量操作生成幂等 request ID。
-- 第六阶段 Settings 管理 UI：从 DSH 公共 Session list 读取当前 live Session，展示 exact Active Space、正式记忆、候选及 payload-free 来源/lineage，提供受治理的搜索/筛选、append-only Candidate 编辑/合并、人工批准/拒绝和逐项 partial-success 批量治理；冲突候选必须由 Owner 明确选择 keep-both 或 supersede。无 Session 与只读 Binding 均失败关闭。
-- 第七阶段审批策略核心：私有 runtime settings 默认 `manual`；Owner 可用 exact revision 显式切换到带 IANA 时区与 `HH:mm` 本地时间的 `scheduled-auto`，并发陈旧更新失败关闭。此阶段尚未启动调度器或自动审批。
-- 第八阶段策略 RPC：Memory-owned settings Manager 与 loopback Settings Host 通过 live Session/Active Space receipt 暴露策略读取和 exact-revision 更新；browser client 不能提交 Owner、Workspace 或 settings path。
-- 第九阶段策略 UI：Settings tab 可显式选择 `manual` 或带 IANA 时区和本地时间的 `scheduled-auto`，并用已观察到的 exact revision 保存；只读 Active Space Binding 在 UI 与 Host 两层都失败关闭。
-- 第十阶段到期计算：纯 `MemoryApprovalScheduleV1` Module 给出最近已到期和下一当地日期槽位；DST 缺失时间顺延到第一个有效时刻，重复时间取第一次。此阶段仍不启动调度副作用。
-- 第十一阶段本机调度生命周期：首次观察策略只武装下一槽位；跨进程 lease 覆盖 runner 执行，90 条 payload-free receipt 防止同一当地日期重复运行，策略 revision 在返回后重读，Cordis disposer 会取消在途 runner。没有 runner 时保持武装且不写 receipt。
-- 第十二阶段治理型自动审核 runner：只接受带 DSH Session receipt 的结构化建议；在提交前重读 exact policy revision、trusted Owner、DSH Workspace Binding revision、Space、Candidate 完整快照、来源与 deterministic conflict。低置信度、失败、`boundary`、`commitment` 和阻塞冲突均 defer。当前尚未提供实际创建 rc.8 Agent Session 的 Evaluator Adapter。
-- 第十三阶段 rc.8 DSH Session Evaluator：每个候选使用 fresh、无 seed/parent 的 Agent Session；complete system prompt、runtime-context suppression、空工具 catalog 与执行 guard 共同封闭能力面。候选和严格 JSON 输出进入 DSH 日志，只有 `ctx.sessions.flush()` 确认存在 durability listener 后才返回 exact event receipt。Provider/model 可留空以沿用 DSH 默认路由，也可在插件配置中固定。
-- 第十四阶段独立迁移事务：旧 MistyMoon SQLite confirmed rows 先形成 content-free logical digest plan；apply 要求 exact Owner confirmation、source/target digest，并在目标 Archive lease 内备份原 generation、导入临时 generation 后原子发布。结果携带 rollback token；rehearsal 与实际 rollback 都拒绝目标或备份漂移。
-- 第十五阶段 Space sharing catalog：单独的版本化目录以 exact revision 保存 Owner 的 `isolated`、`selective` 或 `federated` 模式。Selective Grant 是带 Memory Kind/visibility 过滤的单向、只读、非传递授权；Federation 只包含显式成员，且一个 Space 最多属于一个 Federation。解析器只返回 Active Space 的直接授权 Source Space 与 policy receipt，不改变 DSH Workspace Binding 或记忆归属。
-- 第十六阶段 Borrowed Recall：Workspace Binding 仍只选择一个 Active Space；Router 依据 sharing catalog 从物理隔离的 Source Archive 执行只读召回，在 Archive 原有 Owner/scope/disclosure gate 后应用 Grant 过滤，然后对本地与借用结果重新执行一次全局数量/字符预算。每条借用结果携带 Source Space、relation 与 policy revision；策略在读取期间变化时丢弃全部借用结果，借用 ID 不能通过 Active Space facade 修改。
-- 第十七阶段共享 Settings：Memory-owned loopback Host 只在 live DSH Session 成功解析 Active Space 后读取 Owner-bound sharing facade；浏览器不能提交 Owner、cwd、Workspace 或路径。Settings client 严格校验 Space/policy 响应并只发送 exact revision 与显式关系。UI 可切换三种模式、创建/移除带多种 Memory Kind/visibility 的单向 Grant，以及创建/移除多个成员不重叠的 Federation；只读 Active Space Binding 只能查看不能保存。
-- 第十八阶段首次设置：即使当前 DSH Workspace 尚无 Active Space，Owner-bound setup facade 也只依据 live Session 的 exact `SessionHeader.cwd` 列出当前 Workspace Bindings、创建 Memory Space，并把已有 Space 绑定到当前 DSH Workspace。浏览器不能提交 Owner 或 cwd；相同名称的重复创建与完全相同的重复 Binding 是幂等的。用户可在另一个 DSH Workspace 的 live Session 中绑定同一 Space，也可创建多个未自动互通的独立 Space。
-- npm 发布边界：内部 workspace 包继续私有；唯一安装包 `@mistymoon/dsh-mmem` 聚合 Memory、本地 principal Adapter、Settings Host 和 Settings UI，并声明官方 DSH bundle patch。
+## 安装与下载
 
-## 目录
+运行环境：
 
-```text
-dsh-Mmem/
-├─ CONTEXT.md      Memory Space、Scope、Binding 与共享的统一领域词汇
-├─ packages/
-│  ├─ memory/       当前 Memory implementation 迁移基线
-│  ├─ settings-ui/  Session-bound DSH Settings tab 与 browser bundle
-│  └─ bundle/       唯一可发布的 `@mistymoon/dsh-mmem` npm 包
-├─ scripts/         maintenance 与旧数据 migration CLI
-├─ cordis.patch.yml 开发组合草案
-└─ AGENTS.md
-```
+- Node.js `^22.19.0 || >=24.0.0`
+- DSH `>=0.1.0-rc.7 <0.1.0`
+- 当前推荐 DSH `0.1.0-rc.8`
 
-## 目标审批模式
-
-- `manual`：默认；候选只由 Owner 审核。
-- `scheduled-auto`：Owner 显式选择时区与本地时间后，插件在本机 DSH Runtime 中集中审核低风险候选。
-
-CI/CD 只负责中性测试、构建和发布审计，绝不访问真实用户记忆。若模型参与审核，它只返回不可信结构化建议；Memory 在提交前重新校验 Owner、scope、来源、冲突、策略 revision 与 Archive generation。
-
-Memory Space、Scope、Binding 与共享术语以 `CONTEXT.md` 为准。DSH 是 Workspace 身份与生命周期的唯一权威；dsh-Mmem 不创建平行的 Workspace 标识。这里的 `Memory Space` 表示独立治理/召回空间，`Memory Scope` 仍只表示事实属于哪个现实或叙事范围，三者不会合并。
-
-## 开发
-
-环境基线：Node.js `^22.19.0 || >=24.0.0`、pnpm `11.7.0`、DSH `0.1.0-rc.8`。公开 peer range 同时保留已验证的 `rc.7`。
+普通用户应通过 DSH 插件命令安装已经验收的确切版本：
 
 ```powershell
-pnpm install
-pnpm check
+dsh plugin --profile web add @mistymoon/dsh-mmem@0.0.1-alpha.0
 ```
 
-`cordis.patch.yml` 与公开包中的 bundle patch 都只引用 `@mistymoon/dsh-mmem` 及其子入口。运行以下命令会构建、审计、执行临时 clean install，并把唯一可上传的 tarball 留在 `.artifacts/npm/`：
+希望跟随 alpha dist-tag 时可以使用：
 
 ```powershell
-pnpm pack:npm
+dsh plugin --profile web add @mistymoon/dsh-mmem@alpha
 ```
 
-该命令不会登录或发布 npm。最终 `npm publish <tgz> --access public`、dist-tag 和版本选择只由 Owner 手动执行。rc.8 clean Profile UI smoke 与许可证复核记录见 [`research/release-readiness-0.0.1-alpha.0.md`](research/release-readiness-0.0.1-alpha.0.md)；公开发布后仍应从 registry 包在全新 DSH Home 重复验收。
+如果只想把 npm 包下载为 `.tgz`、暂不安装：
 
-旧 SQLite 到一个已经选定的 Memory Space Archive 的迁移使用四步 CLI。`plan` 只输出数量、路径和摘要，不输出记忆内容；把其返回的 token、confirmation 和 digest 原样传给 `apply`。迁移后先运行 `rehearse-rollback`，只有报告 `applicable: true` 时才可用结果中的 confirmation 执行 `rollback`：
+```powershell
+npm pack @mistymoon/dsh-mmem@0.0.1-alpha.0
+```
+
+自行维护 Cordis/DSH 组合的集成开发者也可以把它作为依赖安装：
+
+```powershell
+npm install @mistymoon/dsh-mmem@0.0.1-alpha.0
+```
+
+公开包已经声明 `dsh.bundle.patch`、Host 入口与 Web client discovery；使用 DSH 插件命令时不需要手工修改已安装的包。插件在 Harness 进程中运行，安装前应先审阅本仓库和包内的 `cordis.patch.yml`。
+
+## 首次使用
+
+1. 在 DSH Web 中打开一个属于目标 DSH Workspace 的 live Session。
+2. 进入 Memory Settings。若该 Workspace 尚未绑定 Memory Space，页面会显示首次设置。
+3. 创建一个 Memory Space，或把已有 Space 绑定到当前 Workspace。
+4. 选择 Binding 是只读还是读写；需要接收新 Observation/Candidate 时，将一个读写 Space 设为该 Workspace 的 Default Write Space。
+5. 审批模式默认是 `manual`。只有在用户显式保存 `scheduled-auto`、IANA 时区和当地审核时间后，定时审核才会启动。
+
+Workspace 身份只取自 live DSH `SessionHeader.cwd`。浏览器不能自行提交 Owner、`cwd`、任意 Workspace 身份或 Archive 路径。
+
+## 核心能力
+
+- **可追溯治理**：Confirmed Memory 保留 Owner、Memory Kind、可见性、来源消息 ID、时间与 append-only revision lineage；纠正通过新记录替代旧记录，不静默改写历史。
+- **候选审核**：支持搜索、筛选、人工批准/拒绝、编辑、合并、冲突处理和 partial-success 批量决策。Pending、Rejected 和 Import Draft 永不参与召回。
+- **安全召回**：默认使用本地 BM25，并在检索前后执行 Owner、authority、scope、有效期、visibility 与 disclosure gate；模型看到的 Recall Snapshot 会写入 DSH Session 日志。
+- **多个 Memory Spaces**：每个 Space 使用物理隔离的 Archive；一个 DSH Workspace 可绑定 Space，一个 Space 也可由多个 DSH Workspaces 共用。
+- **可治理的跨 Space 召回**：跨空间关系只影响只读召回，不复制记忆、不改变 Source Space，也不授予修改来源记录的权限。
+- **本机定时审核**：按用户 IANA 时区和当地时间运行，处理 DST、跨进程 lease 和每日去重；它不依赖 CI/CD 读取用户私有数据。
+- **旧数据迁移**：提供从旧 MistyMoon SQLite confirmed rows 到已选定 Space Archive 的显式 plan/apply/rehearse-rollback/rollback 流程。
+
+## Memory Space 与互通模式
+
+Memory Space 是独立治理与召回单元，不等于 Memory Scope，也不等于 DSH Workspace。完整领域词汇见 [`CONTEXT.md`](CONTEXT.md)。
+
+| 模式 | 跨 Space 召回 | 适用场景 |
+| --- | --- | --- |
+| `isolated` | 不跨 Space；只查询当前 Active Space | 项目、身份或叙事必须完全隔离 |
+| `selective` | 仅按显式单向 Grant 读取，并过滤 Memory Kind/visibility；授权不传递 | 只共享某类可控事实 |
+| `federated` | 显式 Federation 成员间互相召回；新 Space 不会自动加入 | 多个 Space 需要完整而可审计的共用记忆 |
+
+Borrowed Recall 始终保留 Source Space、授权关系和 policy revision，并与本地结果共同重新应用一次全局数量/字符预算。如果读取期间共享策略发生变化，借用结果会被全部丢弃。
+
+## 审批模式
+
+### `manual`
+
+默认模式。候选只能由 Owner 在 Session-bound Settings UI 或受治理工具中批准、拒绝、编辑或合并。重复/冲突候选要求显式选择 keep-both 或 supersede。
+
+### `scheduled-auto`
+
+用户显式选择 IANA 时区和当地时间后，插件在本机 DSH Runtime 中集中审核。每个候选都使用 fresh、无 parent/seed、无工具的 DSH Agent Session 生成结构化建议；Memory 治理层在提交前重新校验策略 revision、Owner、Workspace Binding、Space、Candidate、来源和冲突。
+
+失败、低置信度、格式异常、`boundary`、`commitment`、阻塞冲突或治理状态变化都会 defer 到人工队列。自动审核不会把 Archive 写权限交给评估模型。
+
+这里的“自动审批”是用户本机的可取消调度任务，不是读取真实 DSH Home 的云端 CI。CI/CD 只运行中性测试、构建和发布审计。
+
+## 数据与安全边界
+
+- Memory Archive、设置、DSH Sessions、日志和凭据位于用户私有 DSH Home，不属于 npm 包，也不应进入 Git。
+- Pending、Rejected、Import Draft、跨 Owner/scope 或未获 disclosure 授权的内容不会进入召回。
+- 默认 `local-dsh-host-rpc` authority 面向本机回环、单 Owner Web 部署；其他通道在提供可信 principal Adapter 前失败关闭。
+- 外部记忆或高级检索引擎只能作为可替换 Provider；Archive 仍是治理事实来源。
+
+## 当前限制
+
+- 这是 alpha 版本，尚未声明兼容 DSH `rc.9`、后续 rc 或 stable；扩大范围前需要重新跑完整兼容矩阵。
+- 自动候选抽取 seam 已存在，但默认不捆绑抽取 Provider；候选仍可由受治理的 DSH 工具提出。
+- 默认检索是本地 BM25；PageIndex 和 graph Adapter 默认关闭，远程引擎、embedding 与 reranking 不属于当前基线。
+- Lifecycle confirmation plan 是进程内对象，重启后需要依据重放的 Archive 重新创建。
+- Standalone migration 支持事务级回滚；已导入批次目前没有业务级“整批撤销”命令，单条记录仍可通过 append-only forget 治理。
+
+## 旧 MistyMoon 数据迁移
+
+迁移不会发现或创建 DSH Workspace/Memory Space。目标 Archive 必须属于用户已经选定的 Space，并应在 DSH 停止写入该 Archive 时操作。`plan` 只输出数量、路径和摘要，不输出记忆内容：
 
 ```powershell
 pnpm migrate:standalone -- plan <source.sqlite> <target-memories.jsonl> <owner-id> <authority> <scope-json> <memory-kind>
@@ -80,21 +112,52 @@ pnpm migrate:standalone -- rehearse-rollback <rollback-token>
 pnpm migrate:standalone -- rollback <rollback-token> <rollback-confirmation>
 ```
 
-这些命令不创建 DSH Workspace 或 Memory Space；目标路径必须来自 Owner 已选定的 Space。迁移应在 DSH 停止写入该 Archive 时运行。
+先运行 `rehearse-rollback`；只有结果为 `applicable: true` 时，才应使用返回的 confirmation 执行实际 rollback。首次迁移应使用中性副本演练，不直接操作唯一真实档案。
 
-## 兼容与调研
+## 仓库结构
 
-- 完整开发与发行基线：DSH `0.1.0-rc.8`。
-- 公开兼容声明：`>=0.1.0-rc.7 <0.1.0`；后续 rc 必须重跑完整矩阵后再扩大。
-- 竞品、差异化与采用判断：[`research/dsh-memory-plugin-ecosystem-2026-08-21.md`](research/dsh-memory-plugin-ecosystem-2026-08-21.md)。
-- Owner 手动上传 npm 前的验收与许可证清单：[`research/release-readiness-0.0.1-alpha.0.md`](research/release-readiness-0.0.1-alpha.0.md)。
+```text
+dsh-Mmem/
+├─ CONTEXT.md       Memory Space、Scope、Binding 与共享的领域词汇
+├─ packages/
+│  ├─ memory/       Archive、治理、召回、调度与迁移核心
+│  ├─ settings-ui/  Session-bound DSH Settings tab 与 browser bundle
+│  └─ bundle/       唯一公开包 @mistymoon/dsh-mmem
+├─ scripts/         构建、发布审计与迁移 CLI
+├─ research/        竞品调研与发行验收记录
+├─ cordis.patch.yml 开发组合入口
+└─ AGENTS.md
+```
 
-## 下一步
+内部 workspace 包保持 `private: true`；唯一公开安装面是 `@mistymoon/dsh-mmem`。
 
-1. 由 Owner 审阅并依次合并堆叠 PR。
-2. 合并后从最终主分支重新生成 tarball、核对 digest 与版本。
-3. 只由 Owner 手动上传 npm；上传后从 registry 包在全新 DSH Home 重复 clean Profile smoke。
+## 开发与发布验收
 
-## 许可证
+开发环境使用 pnpm `11.7.0`：
 
-本迁移基线沿用 MIT License。外部 Provider、模型、二进制与第三方代码保留各自许可证；LivingMemory 为 AGPL-3.0，只能作为产品行为参考，不能复制实现到本 MIT 仓库。
+```powershell
+pnpm install
+pnpm check
+```
+
+生成并审计唯一可上传 tarball：
+
+```powershell
+pnpm pack:npm
+```
+
+该命令不会登录或发布 npm。npm 登录、版本、dist-tag、`npm publish` 和 Release 仍由 Owner 手动执行。npm 版本不可重复发布；已经上传的 `0.0.1-alpha.0` 不能用于下一次发布。新预发布版本必须显式指定 tag，例如把下面的 `VERSION` 替换成新版本号：
+
+```powershell
+npm publish .\.artifacts\npm\mistymoon-dsh-mmem-VERSION.tgz --tag alpha --access public
+```
+
+每个新版本发布后，都应从 registry 包在全新 DSH Home 中重复 clean Profile 验收。
+
+## 兼容性、调研与许可证
+
+- 完整发行验收：[`research/release-readiness-0.0.1-alpha.0.md`](research/release-readiness-0.0.1-alpha.0.md)
+- DSH 记忆插件生态、差异化与采用判断：[`research/dsh-memory-plugin-ecosystem-2026-08-21.md`](research/dsh-memory-plugin-ecosystem-2026-08-21.md)
+- 问题反馈：[GitHub Issues](https://github.com/mianyoubiaoqing/dsh-Mmem/issues)
+
+本项目使用 MIT License。外部 Provider、模型、二进制与第三方代码保留各自许可证；LivingMemory 是 AGPL-3.0 项目，只作为产品行为参考，其实现不会复制到本 MIT 仓库。
