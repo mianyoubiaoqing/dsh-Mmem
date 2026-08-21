@@ -7,6 +7,7 @@ import type {
 import type { CandidateExtractionReceiptV1, ExtractedMemoryDraftV1 } from './candidate-extraction.js'
 import type { MemoryConflictAssessmentV1 } from './conflict.js'
 import type { DerivedMemoryViewInvalidationReceiptV1 } from './lifecycle.js'
+import type { MemoryTurnEvidenceCapsuleV1 } from './turn-evidence.js'
 
 /** Owner-governed visibility retained with every memory. */
 export type MemoryVisibility = 'personal' | 'confidential'
@@ -42,10 +43,12 @@ export interface MemoryRecord extends ScopedMemoryFields {
   status: 'confirmed' | 'forgotten' | 'superseded'
 }
 
-/** Owner-reviewable scoped memory that is never recalled before approval. */
+/** Owner-reviewable, time-bounded memory that is only provisionally recalled before approval. */
 export interface MemoryCandidate extends ScopedMemoryFields {
   event: 'candidate'
-  status: 'pending' | 'approved' | 'rejected' | 'superseded'
+  status: 'pending' | 'approved' | 'rejected' | 'superseded' | 'expired'
+  expiresAt: string
+  turnEvidenceAvailable?: true
   sourceCandidateIds?: string[]
   extraction?: {
     schemaVersion: 1
@@ -100,6 +103,8 @@ export interface MemoryCandidateProposal extends TrustedMemoryRequest {
   recordedAt?: string
   validFrom?: string
   validTo?: string
+  /** Host-selected user-visible content for a completed top-level DSH turn. */
+  turnEvidence?: MemoryTurnEvidenceCapsuleV1
 }
 
 /** Input for resolving one pending candidate. */
@@ -343,12 +348,37 @@ export interface MemoryRecallItemV1 {
   }>
 }
 
+export interface MemoryTurnEvidenceExpandRequestV1 extends TrustedMemoryRequest {
+  candidateId: string
+  cursor?: number
+  maxCharacters?: number
+}
+
+/** One bounded page from a pending Candidate's temporary user-visible Source Turn. */
+export interface MemoryTurnEvidencePageV1 {
+  schemaVersion: 1
+  reliability: 'untrusted-provisional'
+  candidateId: string
+  expiresAt: string
+  cursor: number
+  content: string
+  nextCursor?: number
+}
+
+/** Unconfirmed Candidate returned in a separate, explicitly untrusted recall lane. */
+export interface MemoryProvisionalRecallItemV1 {
+  candidate: MemoryCandidate
+  score: number
+  reasons: MemoryRecallItemV1['reasons']
+}
+
 /** Exact governed receipt used to build one model-visible memory projection. */
 export interface MemoryRecallSnapshotV1 {
   schemaVersion: 1
   query: string
   createdAt: string
   items: MemoryRecallItemV1[]
+  provisionalItems?: MemoryProvisionalRecallItemV1[]
   shadowComparisons?: Array<{
     providerId: string
     providerVersion: string
@@ -367,6 +397,7 @@ export interface CompanionMemoryArchive {
   observeExplicit(input: ExplicitMemoryObservation): Promise<MemoryRecord | undefined>
   recall(input: MemoryRecall): MemoryRecord[]
   retrieve(input: MemoryRetrievalRequestV1): Promise<MemoryRecallSnapshotV1>
+  expandTurnEvidence(input: MemoryTurnEvidenceExpandRequestV1): MemoryTurnEvidencePageV1
   list(input: MemoryList): MemoryRecord[]
   forget(input: MemoryForget): Promise<MemoryRecord>
   replace(input: MemoryReplace): Promise<MemoryRecord>

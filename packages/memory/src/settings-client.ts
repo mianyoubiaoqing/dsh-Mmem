@@ -290,7 +290,9 @@ function governedCandidate(value: unknown): MemoryCandidate {
     'sourceMessageId',
     'status',
   ]
-  const optional = ['validFrom', 'validTo', 'sourceCandidateIds', 'extraction']
+  const optional = [
+    'validFrom', 'validTo', 'sourceCandidateIds', 'extraction', 'expiresAt', 'turnEvidenceAvailable',
+  ]
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError('Candidate must be an object')
   }
@@ -300,12 +302,15 @@ function governedCandidate(value: unknown): MemoryCandidate {
     throw new TypeError('Candidate contains missing or unknown fields')
   }
   if (input.schemaVersion !== 2 || input.event !== 'candidate') throw new TypeError('Candidate schema is invalid')
-  for (const key of ['id', 'ownerId', 'observationId', 'createdAt', 'content', 'sourceMessageId'] as const) {
+  for (const key of ['id', 'ownerId', 'observationId', 'createdAt', 'sourceMessageId'] as const) {
     if (typeof input[key] !== 'string' || input[key].trim() === '') throw new TypeError(`Candidate ${key} is invalid`)
   }
   parseMemoryScopeV1(input.scope)
   parseMemoryKind(input.memoryKind)
   validateMemoryValidity({ recordedAt: input.createdAt as string })
+  const expiresAt = input.expiresAt === undefined
+    ? new Date(Date.parse(input.createdAt as string) + 24 * 60 * 60 * 1_000).toISOString()
+    : validateMemoryValidity({ recordedAt: typeof input.expiresAt === 'string' ? input.expiresAt : '' }).recordedAt
   validateMemoryValidity({
     recordedAt: typeof input.recordedAt === 'string' ? input.recordedAt : '',
     ...(input.validFrom === undefined ? {} : { validFrom: typeof input.validFrom === 'string' ? input.validFrom : '' }),
@@ -315,8 +320,14 @@ function governedCandidate(value: unknown): MemoryCandidate {
     throw new TypeError('Candidate visibility is invalid')
   }
   if (input.status !== 'pending' && input.status !== 'approved'
-    && input.status !== 'rejected' && input.status !== 'superseded') {
+    && input.status !== 'rejected' && input.status !== 'superseded' && input.status !== 'expired') {
     throw new TypeError('Candidate status is invalid')
+  }
+  if (typeof input.content !== 'string' || (input.status !== 'expired' && input.content.trim() === '')) {
+    throw new TypeError('Candidate content is invalid')
+  }
+  if (input.turnEvidenceAvailable !== undefined && input.turnEvidenceAvailable !== true) {
+    throw new TypeError('Candidate turn evidence availability is invalid')
   }
   if (input.sourceCandidateIds !== undefined
     && (!Array.isArray(input.sourceCandidateIds)
@@ -336,7 +347,7 @@ function governedCandidate(value: unknown): MemoryCandidate {
     }
     parseCandidateExtractionReceiptV1(extraction.receipt)
   }
-  return value as MemoryCandidate
+  return { ...input, expiresAt } as unknown as MemoryCandidate
 }
 
 function governedRecord(value: unknown): MemoryRecord {

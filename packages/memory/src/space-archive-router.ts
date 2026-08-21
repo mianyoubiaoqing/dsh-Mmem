@@ -1,6 +1,7 @@
 import { isAbsolute, join } from 'node:path'
 import type {
   CompanionMemoryArchive,
+  MemoryProvisionalRecallItemV1,
   MemoryRecallItemV1,
   MemoryRecallSnapshotV1,
   MemoryRetrievalRequestV1,
@@ -32,14 +33,20 @@ export interface MemorySpaceRecallItemV1 extends MemoryRecallItemV1 {
   authorization?: SpaceRecallAuthorizationV1
 }
 
+/** Provisional Candidate retained only from the directly entered Active Space. */
+export interface MemorySpaceProvisionalRecallItemV1 extends MemoryProvisionalRecallItemV1 {
+  sourceSpaceId: string
+}
+
 /** Model-visible recall receipt with exact Active Space and Binding revision. */
-export interface MemorySpaceRecallSnapshotV1 extends Omit<MemoryRecallSnapshotV1, 'items'> {
+export interface MemorySpaceRecallSnapshotV1 extends Omit<MemoryRecallSnapshotV1, 'items' | 'provisionalItems'> {
   activeSpace: {
     spaceId: string
     access: 'read' | 'read-write'
     bindingRevision: string
   }
   items: MemorySpaceRecallItemV1[]
+  provisionalItems?: MemorySpaceProvisionalRecallItemV1[]
 }
 
 /** Result of resolving a DSH Session to one physically isolated Space Archive. */
@@ -149,7 +156,12 @@ class SpaceArchiveRouter implements MemorySpaceArchiveRouterV1 {
         }
         const overfetch = { ...input, limit: 100, maxCharacters: 100_000 }
         const snapshot = await archive.retrieve(overfetch)
+        const { provisionalItems: archiveProvisionalItems, ...baseSnapshot } = snapshot
         const localItems: MemorySpaceRecallItemV1[] = snapshot.items.map(item => ({
+          ...item,
+          sourceSpaceId: resolution.spaceId,
+        }))
+        const provisionalItems = archiveProvisionalItems?.map(item => ({
           ...item,
           sourceSpaceId: resolution.spaceId,
         }))
@@ -208,13 +220,14 @@ class SpaceArchiveRouter implements MemorySpaceArchiveRouterV1 {
           items.push(item)
         }
         return {
-          ...snapshot,
+          ...baseSnapshot,
           activeSpace: {
             spaceId: resolution.spaceId,
             access: resolution.access,
             bindingRevision: resolution.bindingRevision,
           },
           items,
+          ...(provisionalItems === undefined ? {} : { provisionalItems }),
         }
       },
       list: input => {
@@ -244,6 +257,10 @@ class SpaceArchiveRouter implements MemorySpaceArchiveRouterV1 {
       listCandidates: input => {
         read(input)
         return archive.listCandidates(input)
+      },
+      expandTurnEvidence: input => {
+        read(input)
+        return archive.expandTurnEvidence(input)
       },
       listRelationships: input => {
         read(input)

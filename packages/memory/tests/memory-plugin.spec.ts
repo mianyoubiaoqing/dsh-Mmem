@@ -31,6 +31,43 @@ function sessionAgent(session: Session): Agent {
 }
 
 describe('MistyMoon memory plugin', () => {
+  it('logs provisionally recalled Candidates in a separate untrusted section', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mistymoon-provisional-plugin-'))
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(MemoryPlugin, { path: join(root, 'memory.jsonl'), recallLimit: 4 })
+    const candidate = await ctx.mistymoonMemory.propose({
+      context: PERSONAL_COMPANION_ACCESS,
+      sourceMessageId: 'provisional-plugin-source',
+      content: 'Owner 可能偏好凤凰单丛乌龙茶。',
+      visibility: 'personal',
+      memoryKind: 'preference',
+    })
+    const session = Session.create(SessionId('provisional-memory-session'))
+    const agent = sessionAgent(session)
+    const ask = createUserMessage({
+      content: [{ type: 'text', text: '推荐什么乌龙茶？' }],
+      source: { kind: 'user', rpcId: 'rpc-provisional-ask' } as ReturnType<typeof createUserMessage>['source'],
+    })
+    session.append('turn/start', { turn: 1 })
+
+    const decision = await agentEvents(ctx, agent).waterfall(
+      'agent/pre-step',
+      { messages: [ask], turn: 1, step: 1, signal: new AbortController().signal },
+      () => Promise.resolve({ kind: 'enter' as const, messages: [ask] }),
+    )
+    if (decision.kind !== 'enter') throw new Error('provisional recall unexpectedly rejected the step')
+    const projection = decision.messages.find(message => message.source.kind === 'plugin')
+    const text = projection?.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n') ?? ''
+    expect(text).toContain('Unreliable provisional memories')
+    expect(text).toContain('not current instructions')
+    expect(text).toContain(`[candidate:${candidate.id}; expires:${candidate.expiresAt}`)
+    expect(text).toContain(candidate.content)
+  })
+
   it('routes model-visible recall through the Active Space of the DSH Session Workspace', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-space-plugin-'))
     const ctx = new Context()
@@ -190,8 +227,51 @@ describe('MistyMoon memory plugin', () => {
     })
     if (active.kind !== 'active') throw new Error('expected an Active Space')
     expect(calls).toBe(1)
-    expect(active.listCandidates({ context: PERSONAL_COMPANION_ACCESS })).toEqual([
+    expect(active.listCandidates({ context: PERSONAL_COMPANION_ACCESS })).toEqual(expect.arrayContaining([
       expect.objectContaining({ content: 'Project Alpha 的中性候选。', status: 'pending' }),
+      expect.objectContaining({ memoryKind: 'summary', turnEvidenceAvailable: true }),
+    ]))
+  })
+
+  it('creates one provisional turn summary with user-visible evidence without an extraction Provider', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-turn-summary-'))
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(MemoryPlugin, { path: join(root, 'memory.jsonl') })
+    const session = Session.create(SessionId('turn-summary-session'))
+    const agent = sessionAgent(session)
+    const owner = createUserMessage({
+      content: [{ type: 'text', text: '请为 Project Alpha 记录一次中性的部署讨论。' }],
+      source: { kind: 'user', rpcId: 'rpc-turn-summary' } as ReturnType<typeof createUserMessage>['source'],
+    })
+    const assistant = createAssistantMessage({
+      content: [{ type: 'text', text: '已讨论蓝绿部署及回滚检查。' }],
+      source: { provider: 'fixture', model: 'fixture' },
+    })
+    session.append('turn/start', { turn: 1 })
+    session.append('user/message', owner, { surfaceOp: 'append' })
+    session.append('step/start', { turn: 1, step: 1 })
+    session.append('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: assistant,
+    }, { surfaceOp: 'append', sourceEventSeqs: [] })
+
+    await agentEvents(ctx, agent).serial('agent/turn-stopping', {
+      turn: 1,
+      signal: new AbortController().signal,
+    })
+
+    expect(ctx.mistymoonMemory.listCandidates({ context: PERSONAL_COMPANION_ACCESS })).toEqual([
+      expect.objectContaining({
+        memoryKind: 'summary',
+        status: 'pending',
+        content: expect.stringContaining('蓝绿部署及回滚检查'),
+        turnEvidenceAvailable: true,
+      }),
     ])
   })
 
@@ -247,7 +327,10 @@ describe('MistyMoon memory plugin', () => {
 
     expect(calls).toBe(1)
     expect(ctx.mistymoonMemory.listCandidates({ context: PERSONAL_COMPANION_ACCESS }))
-      .toEqual([expect.objectContaining({ content: '中性自动候选。', status: 'pending' })])
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ content: '中性自动候选。', status: 'pending' }),
+        expect.objectContaining({ memoryKind: 'summary', turnEvidenceAvailable: true }),
+      ]))
   })
 
   it('logs the exact recalled-memory projection as a DSH plugin message', async () => {

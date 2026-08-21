@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { loadMemoryRuntimeSettings, updateMemoryApprovalPolicy } from '../src/runtime-settings.js'
 
 describe('Memory runtime settings', () => {
-  it('defaults to revision-zero manual approval when no Owner settings exist', async () => {
+  it('defaults to revision-zero scheduled automatic approval when no Owner settings exist', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-settings-'))
 
     await expect(loadMemoryRuntimeSettings(join(root, 'settings.json'), 8)).resolves.toEqual({
@@ -14,7 +14,9 @@ describe('Memory runtime settings', () => {
       approvalPolicy: {
         schemaVersion: 1,
         revision: 0,
-        mode: 'manual',
+        mode: 'scheduled-auto',
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        localTime: '03:00',
       },
     })
   })

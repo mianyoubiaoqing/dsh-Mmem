@@ -44,7 +44,7 @@ The package declares its DSH composition through `dsh.bundle.patch`, including t
 2. Open Memory Settings.
 3. Create a Memory Space or bind an existing Space to that Workspace.
 4. Choose read-only or read-write access and, when needed, select one Default Write Space.
-5. Keep the default `manual` review policy or explicitly configure `scheduled-auto` with an IANA time zone and local review time.
+5. Automatic review is enabled by default using the host IANA time zone at 03:00. If you require manual review, the Owner must explicitly select and save `manual`.
 
 DSH remains the only authority for Workspace identity. dsh-Mmem accepts the exact `SessionHeader.cwd` from a live Session; the browser cannot submit an Owner, `cwd`, arbitrary Workspace, or Archive path.
 
@@ -52,6 +52,7 @@ DSH remains the only authority for Workspace identity. dsh-Mmem accepts the exac
 
 - Owner-, scope-, visibility-, and source-governed confirmed memory with append-only revision lineage.
 - Session-bound record/Candidate search, filtering, provenance, editing, merge, conflict handling, manual review, and partial-success batch decisions.
+- Automatic per-turn summary Candidates with a 24-hour provisional-recall TTL and on-demand paged user-visible Turn Evidence.
 - A sidebar Memory action with searchable directory and semantic graph views over the live Session's governed confirmed Memory.
 - Optional Owner-confirmed semantic relationships persisted during Candidate approval without requiring an external embedding model.
 - Physically isolated Memory Spaces; one Space may intentionally serve multiple DSH Workspaces.
@@ -61,7 +62,7 @@ DSH remains the only authority for Workspace identity. dsh-Mmem accepts the exac
 - Fresh no-parent/no-seed/no-tool DSH Agent Sessions for scheduled recommendations, followed by governance revalidation before any low-risk decision.
 - Content-free exact-digest planning and explicit apply/rehearse/rollback workflow for eligible confirmed rows in the old MistyMoon SQLite store.
 
-Pending, rejected, imported-draft, cross-Owner/scope, or undisclosed content never enters recall. Recall snapshots visible to the model are persisted in DSH Session logs. CI/CD uses neutral fixtures only; scheduled review runs locally in the user's DSH Runtime and never requires cloud CI to read a private DSH Home.
+Unexpired Pending Candidates enter only a separate, explicitly untrusted lane in their directly entered Source Space; they never propagate through Borrowed Recall. Rejected, expired, imported-draft, cross-Owner/scope, or undisclosed content never enters recall. Model-visible recall snapshots and native tool results are persisted in DSH Session logs.
 
 ## Memory Space sharing
 
@@ -75,12 +76,12 @@ Sharing changes read-only recall, not ownership or Workspace Bindings. Borrowed 
 
 ## Scheduled review safety
 
-`manual` is the default and no scheduler runs until the Owner explicitly saves `scheduled-auto`. Malformed or low-confidence evaluator output, failures, `boundary` or `commitment` kinds, blocking conflicts, and any changed policy/Owner/Binding/Space/Candidate/source state are deferred to manual review. The evaluator receives no Archive mutation authority.
+`scheduled-auto` is the default, using the host IANA time zone at 03:00. The Owner must explicitly save `manual` to require per-Candidate review. Malformed or low-confidence evaluator output, failures, `boundary` or `commitment` kinds, blocking conflicts, and any changed policy/Owner/Binding/Space/Candidate/source state are deferred to manual review. The evaluator receives no Archive mutation authority.
 
 ## Data and current limitations
 
 Memory archives, settings, Sessions, logs, and credentials are never package assets. The default `local-dsh-host-rpc` authority is limited to a loopback Web, single-Owner deployment. Other channels fail closed until they provide an authenticated principal adapter.
 
-No candidate-extraction Provider is bundled by default; governed DSH tools can still propose Candidates. Recall defaults to local BM25, while PageIndex and graph adapters are disabled by default. Semantic relationship suggestions use deterministic local conflict/lexical evidence and become facts only after explicit Owner approval; they do not affect recall in this release. Archives that contain the new `relationship-confirmed` event cannot be read by older plugin builds, so keep a recoverable pre-upgrade backup if downgrade capability matters. Later DSH release candidates and stable releases are not claimed until the full compatibility matrix is rerun.
+Automatic turn summaries are bundled; no additional fine-grained candidate-extraction Provider is bundled by default, and governed DSH tools can still propose Candidates. Recall defaults to local BM25, while PageIndex and graph adapters are disabled by default. Semantic relationship suggestions use deterministic local conflict/lexical evidence and become facts only after explicit Owner approval; they do not affect recall in this release. Archives that contain the new `relationship-confirmed` or `turn-evidence` event cannot be read by older plugin builds, so keep a recoverable pre-upgrade backup if downgrade capability matters.
 
 The plugin and repository use the MIT License. See the [GitHub repository](https://github.com/mianyoubiaoqing/dsh-Mmem) for architecture, migration commands, release validation, ecosystem research, and issue reporting.

@@ -1,6 +1,6 @@
 # dsh-Mmem
 
-`dsh-Mmem` 是面向 [DeepSeek Harness（DSH）](https://www.npmjs.com/package/@deepseek-ai/dsh) 的独立长期记忆插件。它把记忆视为需要治理的数据：每条正式记忆都有 Owner、来源、可见性、修订关系和所属 Memory Space；候选记忆默认等待人工审批，也可以由用户显式开启按本地时区运行的定时自动审核。
+`dsh-Mmem` 是面向 [DeepSeek Harness（DSH）](https://www.npmjs.com/package/@deepseek-ai/dsh) 的独立长期记忆插件。它把记忆视为需要治理的数据：每条正式记忆都有 Owner、来源、可见性、修订关系和所属 Memory Space；候选记忆默认按本地时区定时自动审批，Owner 也可以显式切换为逐条人工审批。
 
 本插件只使用 DSH 的公开扩展点。DSH 仍然拥有 Agent Runtime、Session、Workspace、工具、权限和模型路由；dsh-Mmem 不修改 DSH 源码，也不创建与 DSH 平行的 Workspace 身份。
 
@@ -46,14 +46,16 @@ npm install @mistymoon/dsh-mmem@0.0.1-alpha.1
 2. 进入 Memory Settings。若该 Workspace 尚未绑定 Memory Space，页面会直接显示首次设置，不需要刷新会话。
 3. 创建一个 Memory Space，或把已有 Space 绑定到当前 Workspace。
 4. 选择 Binding 是只读还是读写；需要接收新 Observation/Candidate 时，将一个读写 Space 设为该 Workspace 的 Default Write Space。
-5. 审批模式默认是 `manual`。只有在用户显式保存 `scheduled-auto`、IANA 时区和当地审核时间后，定时审核才会启动。
+5. 审批模式默认是 `scheduled-auto`，使用宿主机 IANA 时区的每日 `03:00`。如需逐条人工审批，Owner 必须在设置中手动选择并保存 `manual`。
+
+> **审批提示：自动审批默认开启。** 如需人工审批，请由 Owner 在 Memory Settings 中手动切换为“人工审批”并保存。
 
 Workspace 身份只取自 live DSH `SessionHeader.cwd`。浏览器不能自行提交 Owner、`cwd`、任意 Workspace 身份或 Archive 路径。
 
 ## 核心能力
 
 - **可追溯治理**：Confirmed Memory 保留 Owner、Memory Kind、可见性、来源消息 ID、时间与 append-only revision lineage；纠正通过新记录替代旧记录，不静默改写历史。
-- **候选审核**：支持搜索、筛选、人工批准/拒绝、编辑、合并、冲突处理和 partial-success 批量决策。Pending、Rejected 和 Import Draft 永不参与召回。
+- **临时记忆与候选审核**：每轮结束自动生成带 24 小时 TTL 的摘要 Candidate；未过期 Pending 仅在直接进入其 Memory Space 时作为醒目标注的不可靠记忆临时召回，并可按需分页展开该轮用户可见全文。Rejected、Expired 和 Import Draft 不参与召回。
 - **记忆浏览器**：侧栏底部的“记忆”按钮打开 Session-bound 浏览器，可在按记忆类型分组的目录视图和语义关系图谱之间切换，并支持搜索与图谱缩放。
 - **无需 embedding 的语义关系**：候选审批卡片可用滑块选择是否保存本地可解释规则建议的 `相关` / `矛盾` 关系；关系与正式记忆在同一 Archive 事务内确认，默认不影响召回。
 - **安全召回**：默认使用本地 BM25，并在检索前后执行 Owner、authority、scope、有效期、visibility 与 disclosure gate；模型看到的 Recall Snapshot 会写入 DSH Session 日志。
@@ -76,29 +78,29 @@ Borrowed Recall 始终保留 Source Space、授权关系和 policy revision，�
 
 ## 审批模式
 
-### `manual`
-
-默认模式。候选只能由 Owner 在 Session-bound Settings UI 或受治理工具中批准、拒绝、编辑或合并。重复/冲突候选要求显式选择 keep-both 或 supersede。
-
 ### `scheduled-auto`
 
-用户显式选择 IANA 时区和当地时间后，插件在本机 DSH Runtime 中集中审核。每个候选都使用 fresh、无 parent/seed、无工具的 DSH Agent Session 生成结构化建议；Memory 治理层在提交前重新校验策略 revision、Owner、Workspace Binding、Space、Candidate、来源和冲突。
+默认模式。首次运行使用宿主机 IANA 时区的每日 `03:00`，Owner 可调整时区和当地时间。插件在本机 DSH Runtime 中集中审核；每个候选都使用 fresh、无 parent/seed、无工具的 DSH Agent Session 生成结构化建议，Memory 治理层在提交前重新校验策略 revision、Owner、Workspace Binding、Space、Candidate、来源、TTL 和冲突。
 
 失败、低置信度、格式异常、`boundary`、`commitment`、阻塞冲突或治理状态变化都会 defer 到人工队列。自动审核不会把 Archive 写权限交给评估模型。
 
 这里的“自动审批”是用户本机的可取消调度任务，不是读取真实 DSH Home 的云端 CI。CI/CD 只运行中性测试、构建和发布审计。
 
+### `manual`
+
+如需逐条人工审批，Owner 必须在 Session-bound Settings UI 中手动选择并保存此模式。候选只能由 Owner 批准、拒绝、编辑或合并；重复/冲突候选要求显式选择 keep-both 或 supersede。
+
 ## 数据与安全边界
 
 - Memory Archive、设置、DSH Sessions、日志和凭据位于用户私有 DSH Home，不属于 npm 包，也不应进入 Git。
-- Pending、Rejected、Import Draft、跨 Owner/scope 或未获 disclosure 授权的内容不会进入召回。
+- 未过期 Pending 只进入 Source Space 的独立 Provisional Recall 分栏，不通过 Selective/Federated/Borrowed Recall 传播；Rejected、Expired、Import Draft、跨 Owner/scope 或未获 disclosure 授权的内容不会进入召回。
 - 默认 `local-dsh-host-rpc` authority 面向本机回环、单 Owner Web 部署；其他通道在提供可信 principal Adapter 前失败关闭。
 - 外部记忆或高级检索引擎只能作为可替换 Provider；Archive 仍是治理事实来源。
 
 ## 当前限制
 
 - 这是 alpha 版本，尚未声明兼容 DSH `rc.9`、后续 rc 或 stable；扩大范围前需要重新跑完整兼容矩阵。
-- 自动候选抽取 seam 已存在，但默认不捆绑抽取 Provider；候选仍可由受治理的 DSH 工具提出。
+- 内置自动轮次摘要会创建不可靠 Candidate；更细粒度的事实抽取 seam 已存在，但默认不捆绑额外抽取 Provider，候选也可由受治理的 DSH 工具提出。
 - 默认检索是本地 BM25；PageIndex 和 graph Adapter 默认关闭，远程引擎、embedding 与 reranking 不属于当前基线。
 - 当前语义关系建议只使用本地确定性冲突与词法评估，不等同于向量相似度或模型级语义理解。Owner 的显式审批才使关系成为治理事实；`补充` 类型已进入存储和展示协议，但当前本地建议器不会自动判定它。
 - 写入首个 `relationship-confirmed` 事件后，旧版插件无法读取新增的 Archive 事件类型；升级前应保留可恢复备份，且不支持直接降级读取该 Archive。

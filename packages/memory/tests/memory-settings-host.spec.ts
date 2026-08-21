@@ -179,7 +179,7 @@ describe('dsh-Mmem Settings Host RPC', () => {
       value: {
         schemaVersion: 1,
         activeSpace: { spaceId: space.id, bindingRevision: binding.revision },
-        approvalPolicy: { schemaVersion: 1, revision: 0, mode: 'manual' },
+          approvalPolicy: { schemaVersion: 1, revision: 0, mode: 'scheduled-auto' },
       },
     })
     await expect(registration.handler('settings/approval', {

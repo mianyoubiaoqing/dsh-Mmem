@@ -10,6 +10,128 @@ import { openMemoryArchive } from '../src/index.js'
 import { PERSONAL_COMPANION_ACCESS } from './fixtures.js'
 
 describe('governed BM25 retrieval', () => {
+  it('recalls an unexpired pending Candidate only as provisional memory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mistymoon-provisional-retrieval-'))
+    const archive = await openMemoryArchive({
+      path: join(root, 'memory.jsonl'),
+      now: () => new Date('2026-08-20T12:00:00.000Z'),
+    })
+    const candidate = await archive.propose({
+      context: PERSONAL_COMPANION_ACCESS,
+      sourceMessageId: 'pending-tea-source',
+      content: 'Owner 可能偏好凤凰单丛乌龙茶。',
+      visibility: 'personal',
+      memoryKind: 'preference',
+    })
+
+    const snapshot = await archive.retrieve({
+      context: PERSONAL_COMPANION_ACCESS,
+      query: '乌龙茶',
+      limit: 3,
+      maxCharacters: 500,
+    })
+
+    expect(snapshot.items).toEqual([])
+    expect(snapshot.provisionalItems).toEqual([{
+      candidate,
+      score: expect.any(Number),
+      reasons: [expect.objectContaining({
+        providerId: 'mistymoon-provisional-bm25',
+        reason: 'bm25-term-match',
+      })],
+    }])
+    expect(candidate).toMatchObject({
+      status: 'pending',
+      expiresAt: '2026-08-21T12:00:00.000Z',
+    })
+  })
+
+  it('projects an overdue Candidate as expired instead of pending', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mistymoon-expired-candidate-'))
+    let now = new Date('2026-08-20T12:00:00.000Z')
+    const archive = await openMemoryArchive({
+      path: join(root, 'memory.jsonl'),
+      now: () => now,
+    })
+    const candidate = await archive.propose({
+      context: PERSONAL_COMPANION_ACCESS,
+      sourceMessageId: 'expiring-source',
+      content: 'Owner 可能偏好中性的过期示例。',
+      visibility: 'personal',
+      memoryKind: 'preference',
+    })
+    now = new Date('2026-08-21T12:00:00.001Z')
+
+    expect(archive.listCandidates({ context: PERSONAL_COMPANION_ACCESS })).toEqual([])
+    expect(archive.listCandidates({
+      context: PERSONAL_COMPANION_ACCESS,
+      includeResolved: true,
+    })).toEqual([{
+      ...candidate,
+      status: 'expired',
+      content: '',
+    }])
+    await expect(archive.approveCandidate({
+      context: PERSONAL_COMPANION_ACCESS,
+      candidateId: candidate.id,
+      sourceMessageId: 'late-approval',
+    })).rejects.toThrow('expired')
+  })
+
+  it('expands user-visible Turn Evidence for an unexpired pending Candidate with pagination', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mistymoon-turn-evidence-expand-'))
+    const path = join(root, 'memory.jsonl')
+    const archive = await openMemoryArchive({
+      path,
+      now: () => new Date('2026-08-20T12:00:00.000Z'),
+    })
+    const candidate = await archive.propose({
+      context: PERSONAL_COMPANION_ACCESS,
+      sourceMessageId: 'dsh-turn:session-expand:2',
+      content: '本轮摘要（未审核）：讨论中性部署方案。',
+      visibility: 'personal',
+      memoryKind: 'summary',
+      turnEvidence: {
+        schemaVersion: 1,
+        sessionId: 'session-expand',
+        turn: 2,
+        userMessages: [{ messageId: 'user-expand', text: '请比较蓝绿部署与滚动部署。' }],
+        assistantMessage: { messageId: 'assistant-expand', text: '蓝绿部署便于快速回滚；滚动部署资源开销较低。' },
+      },
+    })
+    await archive.dispose()
+    const reopened = await openMemoryArchive({
+      path,
+      now: () => new Date('2026-08-20T12:01:00.000Z'),
+    })
+
+    const first = reopened.expandTurnEvidence({
+      context: PERSONAL_COMPANION_ACCESS,
+      candidateId: candidate.id,
+      cursor: 0,
+      maxCharacters: 30,
+    })
+    expect(first).toMatchObject({
+      schemaVersion: 1,
+      candidateId: candidate.id,
+      expiresAt: candidate.expiresAt,
+      cursor: 0,
+      content: expect.any(String),
+      nextCursor: 30,
+    })
+    const second = reopened.expandTurnEvidence({
+      context: PERSONAL_COMPANION_ACCESS,
+      candidateId: candidate.id,
+      cursor: first.nextCursor,
+      maxCharacters: 10_000,
+    })
+    expect(second).toMatchObject({
+      candidateId: candidate.id,
+      cursor: 30,
+    })
+    expect(second).not.toHaveProperty('nextCursor')
+  })
+
   it('returns an explained authoritative snapshot and drops unknown Provider IDs', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mistymoon-retrieval-'))
     const provider: RecallIndexProvider = {

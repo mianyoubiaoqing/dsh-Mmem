@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { calculateMemoryApprovalScheduleV1 } from '../src/approval-schedule.js'
 
 describe('Memory approval schedule', () => {
-  it('keeps the scheduler disabled for the default manual policy', () => {
+  it('keeps the scheduler disabled when the Owner selects manual review', () => {
     expect(calculateMemoryApprovalScheduleV1({
       schemaVersion: 1,
       revision: 0,

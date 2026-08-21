@@ -177,6 +177,7 @@ describe('memory storage failure boundaries', () => {
         ownerId: 'owner-fixture', scope: { version: 1, kind: 'companion-reality' },
         observationId: 'candidate-observation', memoryKind: 'summary', recordedAt: '2026-08-18T00:00:00.000Z',
         createdAt: '2026-08-18T00:00:00.000Z',
+        expiresAt: '2026-08-19T00:00:00.000Z',
         content: 'Neutral approval candidate',
         visibility: 'personal',
         sourceMessageId: 'proposal-source',

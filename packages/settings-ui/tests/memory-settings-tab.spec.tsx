@@ -731,6 +731,7 @@ describe('dsh-Mmem Settings tab', () => {
       configure.props.onClick()
       await Promise.resolve()
     })
+    expect(JSON.stringify(tree?.toJSON())).toContain('translated:approvalDefaultWarning')
     await act(async () => {
       tree?.root.findByProps({ 'aria-label': 'translated:approvalMode' })
         .props.onChange({ target: { value: 'scheduled-auto' } })

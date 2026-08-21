@@ -34,6 +34,28 @@ _Avoid_: Relationship Candidate、检索相似度、Memory Space sharing relatio
 由多条来源记忆归纳出的新 Confirmed Memory，并保留完整来源记忆关系；它不是连接既有记忆的语义关系。
 _Avoid_: Confirmed Memory Relationship、合并显示、图谱分组
 
+## Provisional memory
+
+**Pending Candidate**:
+尚未得到 Owner 确认、可能不准确，并在到期前仅能于其 Source Space 内临时召回的记忆候选；它不是治理事实。
+_Avoid_: Confirmed Memory、不可靠的 Confirmed Memory、Import Draft
+
+**Provisional Recall**:
+当前 Session 进入 Candidate 的 Source Space 后，对未过期 Pending Candidate 进行的受限召回；它不会通过 Space sharing 关系传播。
+_Avoid_: Borrowed Recall、Confirmed Memory Recall、Workspace-local Recall
+
+**Source Turn**:
+产生 Candidate 的一个顶层 DSH 用户可见交互轮次；DSH Session 是其原始内容的权威来源。
+_Avoid_: Memory Space、完整 Session、隐藏推理
+
+**Turn Evidence Capsule**:
+与 Pending Candidate 同寿命、属于其 Source Space 的 Source Turn 临时证据副本；它只包含用户可见内容，过期或完成治理后清除 payload。
+_Avoid_: DSH Session、Confirmed Memory、永久 Conversation Archive
+
+**Expired Candidate**:
+超过审核期限且不再允许召回或治理的 Candidate；它只保留无 payload 的审计事实。
+_Avoid_: Rejected Candidate、Forgotten Memory、Archived Memory
+
 ## Spaces and DSH workspaces
 
 **Memory Space**:
@@ -45,7 +67,7 @@ _Avoid_: Memory Scope、数据库分区、文件夹
 _Avoid_: Workspace Reference、任意路径、项目名、Memory Space
 
 **Workspace Binding**:
-一个 DSH Workspace 与一个 Memory Space 之间由 Owner 建立的读取或读写关系。
+一个 DSH Workspace 与一个 Memory Space 之间由 Owner 建立的读取或读写授权关系；它允许 Session 进入 Space，但不把 Space 内容重新分区到来源 Workspace。
 _Avoid_: 自动发现、路径匹配、Space Share Grant
 
 **Default Write Space**:
