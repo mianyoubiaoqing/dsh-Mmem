@@ -23,12 +23,27 @@ export interface MemoryScheduledApprovalRunResultV1 {
   approvedCandidates: number
   rejectedCandidates: number
   deferredCandidates: number
+  reviewReceipts: MemoryScheduledApprovalReviewReceiptV1[]
+}
+
+/** DSH Session evidence for one model recommendation, without Candidate content. */
+export interface MemoryScheduledApprovalReviewReceiptV1 {
+  schemaVersion: 1
+  candidateId: string
+  sessionId: string
+  requestMessageId: string
+  responseMessageId: string
+  requestSeq: number
+  responseSeq: number
+  provider: string
+  model: string
 }
 
 /** Replaceable runner Adapter invoked only after scheduler governance succeeds. */
 export interface MemoryScheduledApprovalRunnerV1 {
   readonly id: string
   readonly version: string
+  available?(): boolean
   run(request: MemoryScheduledApprovalRunRequestV1): Promise<MemoryScheduledApprovalRunResultV1>
 }
 
@@ -77,6 +92,7 @@ export interface MemoryApprovalRunReceiptV1 {
   approvedCandidates?: number
   rejectedCandidates?: number
   deferredCandidates?: number
+  reviewReceipts?: MemoryScheduledApprovalReviewReceiptV1[]
 }
 
 /** Versioned scheduler checkpoint containing no Candidate or Memory payload. */
@@ -202,7 +218,7 @@ function receipt(value: unknown): MemoryApprovalRunReceiptV1 {
   }
   const aggregateKeys = outcome === 'failed'
     ? []
-    : ['reviewedCandidates', 'approvedCandidates', 'rejectedCandidates', 'deferredCandidates']
+    : ['reviewedCandidates', 'approvedCandidates', 'rejectedCandidates', 'deferredCandidates', 'reviewReceipts']
   exactKeys(source, [
     'schemaVersion', 'runId', 'policyRevision', 'timeZone', 'localTime', 'localDate', 'dueAt',
     'startedAt', 'completedAt', 'outcome', 'runnerId', 'runnerVersion', ...aggregateKeys,
@@ -228,7 +244,38 @@ function receipt(value: unknown): MemoryApprovalRunReceiptV1 {
     approvedCandidates: count(source.approvedCandidates, 'scheduler approvedCandidates'),
     rejectedCandidates: count(source.rejectedCandidates, 'scheduler rejectedCandidates'),
     deferredCandidates: count(source.deferredCandidates, 'scheduler deferredCandidates'),
+    reviewReceipts: reviewReceipts(source.reviewReceipts),
   }
+}
+
+function reviewReceipt(value: unknown): MemoryScheduledApprovalReviewReceiptV1 {
+  const source = object(value, 'scheduled approval review receipt')
+  exactKeys(source, [
+    'schemaVersion', 'candidateId', 'sessionId', 'requestMessageId', 'responseMessageId',
+    'requestSeq', 'responseSeq', 'provider', 'model',
+  ], 'scheduled approval review receipt')
+  if (source.schemaVersion !== 1) throw new Error('scheduled approval review receipt schemaVersion must equal 1')
+  const requestSeq = count(source.requestSeq, 'scheduled approval review requestSeq')
+  const responseSeq = count(source.responseSeq, 'scheduled approval review responseSeq')
+  if (responseSeq <= requestSeq) throw new Error('scheduled approval review responseSeq must follow requestSeq')
+  return {
+    schemaVersion: 1,
+    candidateId: nonEmpty(source.candidateId, 'scheduled approval review candidateId'),
+    sessionId: nonEmpty(source.sessionId, 'scheduled approval review sessionId'),
+    requestMessageId: nonEmpty(source.requestMessageId, 'scheduled approval review requestMessageId'),
+    responseMessageId: nonEmpty(source.responseMessageId, 'scheduled approval review responseMessageId'),
+    requestSeq,
+    responseSeq,
+    provider: nonEmpty(source.provider, 'scheduled approval review provider'),
+    model: nonEmpty(source.model, 'scheduled approval review model'),
+  }
+}
+
+function reviewReceipts(value: unknown): MemoryScheduledApprovalReviewReceiptV1[] {
+  if (!Array.isArray(value) || value.length > 1_000) {
+    throw new Error('scheduled approval review receipts must be an array of at most 1000 items')
+  }
+  return value.map(reviewReceipt)
 }
 
 function parseState(value: unknown): MemoryApprovalSchedulerStateV1 {
@@ -281,6 +328,7 @@ function parseRunnerResult(value: unknown): MemoryScheduledApprovalRunResultV1 {
   const source = object(value, 'scheduled approval runner result')
   exactKeys(source, [
     'schemaVersion', 'reviewedCandidates', 'approvedCandidates', 'rejectedCandidates', 'deferredCandidates',
+    'reviewReceipts',
   ], 'scheduled approval runner result')
   if (source.schemaVersion !== 1) throw new Error('scheduled approval runner result schemaVersion must equal 1')
   const result = {
@@ -289,6 +337,7 @@ function parseRunnerResult(value: unknown): MemoryScheduledApprovalRunResultV1 {
     approvedCandidates: count(source.approvedCandidates, 'runner approvedCandidates'),
     rejectedCandidates: count(source.rejectedCandidates, 'runner rejectedCandidates'),
     deferredCandidates: count(source.deferredCandidates, 'runner deferredCandidates'),
+    reviewReceipts: reviewReceipts(source.reviewReceipts),
   }
   if (result.reviewedCandidates !== result.approvedCandidates
     + result.rejectedCandidates + result.deferredCandidates) {
@@ -380,7 +429,7 @@ export function createMemoryApprovalSchedulerV1(options: MemoryApprovalScheduler
         return { schemaVersion: 1, kind: 'waiting', policyRevision: policy.revision, slot: { ...armed.slot } }
       }
       const runner = options.runners.current()
-      if (runner === undefined) {
+      if (runner === undefined || runner.available?.() === false) {
         return {
           schemaVersion: 1,
           kind: 'runner-unavailable',

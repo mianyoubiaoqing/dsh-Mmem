@@ -2,7 +2,7 @@
 
 `dsh-Mmem` 是一个正在从 MistyMoon 套件拆出的独立 DeepSeek Harness 长期记忆插件工作仓库。目标是提供 Owner 隔离、来源可追溯、可人工审批或按用户时区定时自动审核的治理型记忆，并支持绑定 DSH Workspace、可选择性共享的独立 Memory Spaces，而不是把 Memory 绑定到 RP Persona 或另建 Agent Runtime。
 
-> 当前状态：迁移基线，尚未公开发布，也尚未完成 AI 审核 Adapter 和正式迁移工具。当前 Settings tab 已提供 Session-bound 人工候选审批与审批策略配置；本机调度器只会在 runner 注册后触发，不会自行决定或写入候选。不要把此目录直接用于真实档案迁移。
+> 当前状态：迁移基线，尚未公开发布，也尚未完成 rc.8 Agent Session 审核 Adapter 和正式迁移工具。当前 Settings tab 已提供 Session-bound 人工候选审批与审批策略配置；本机调度器与治理 runner 已存在，但没有 DSH Session Evaluator 时不会自行决定或写入候选。不要把此目录直接用于真实档案迁移。
 
 ## 当前包含
 
@@ -22,6 +22,7 @@
 - 第九阶段策略 UI：Settings tab 可显式选择 `manual` 或带 IANA 时区和本地时间的 `scheduled-auto`，并用已观察到的 exact revision 保存；只读 Active Space Binding 在 UI 与 Host 两层都失败关闭。
 - 第十阶段到期计算：纯 `MemoryApprovalScheduleV1` Module 给出最近已到期和下一当地日期槽位；DST 缺失时间顺延到第一个有效时刻，重复时间取第一次。此阶段仍不启动调度副作用。
 - 第十一阶段本机调度生命周期：首次观察策略只武装下一槽位；跨进程 lease 覆盖 runner 执行，90 条 payload-free receipt 防止同一当地日期重复运行，策略 revision 在返回后重读，Cordis disposer 会取消在途 runner。没有 runner 时保持武装且不写 receipt。
+- 第十二阶段治理型自动审核 runner：只接受带 DSH Session receipt 的结构化建议；在提交前重读 exact policy revision、trusted Owner、DSH Workspace Binding revision、Space、Candidate 完整快照、来源与 deterministic conflict。低置信度、失败、`boundary`、`commitment` 和阻塞冲突均 defer。当前尚未提供实际创建 rc.8 Agent Session 的 Evaluator Adapter。
 - npm 发布边界：内部 workspace 包继续私有；唯一安装包 `@mistymoon/dsh-mmem` 聚合 Memory、本地 principal Adapter、Settings Host 和 Settings UI，并声明官方 DSH bundle patch。
 
 ## 目录
@@ -67,7 +68,7 @@ pnpm pack:npm
 ## 下一步
 
 1. 用统一 `GovernedMemoryV1` Interface 深化 Archive/governance/recall Module。
-2. 实现通过独立 DSH Session 留痕的 AI 审核 Adapter，并在每次提交前重校验策略 revision、Owner、Space、Candidate 状态、来源与冲突。
+2. 用 rc.8 `ctx.agents.create()` 实现独立、无工具、完整 prompt、可持久化日志的 DSH Session Evaluator Adapter。
 3. 先发布默认人工审批的独立 MVP，再实现 `scheduled-auto`。
 4. 提供旧 `mistymoon/memory` 到新独立目录的只读 plan、exact digest、备份、Owner confirm、apply 与 rollback rehearsal。
 5. 在已完成的 Catalog、物理隔离、Runtime 路由和 Space-aware Settings governance 上，分阶段实现非传递的有限共享和显式 Federation。

@@ -90,6 +90,10 @@
     "./approval-scheduler": {
       "types": "./lib/approval-scheduler.d.ts",
       "default": "./lib/approval-scheduler.js"
+    },
+    "./approval-review": {
+      "types": "./lib/approval-review.d.ts",
+      "default": "./lib/approval-review.js"
     }
   },
   "scripts": {
