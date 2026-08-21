@@ -432,6 +432,105 @@ describe('dsh-Mmem Settings tab', () => {
     )
   })
 
+  it('reports partial success for a batch Candidate decision', async () => {
+    const activeSpace = {
+      spaceId: 'space-project-alpha',
+      access: 'read-write' as const,
+      bindingRevision: 'binding-batch',
+    }
+    const first = {
+      schemaVersion: 2 as const,
+      event: 'candidate' as const,
+      id: 'candidate-batch-1',
+      ownerId: 'owner-fixture',
+      scope: { version: 1 as const, kind: 'companion-reality' as const },
+      observationId: 'observation-batch-1',
+      memoryKind: 'summary' as const,
+      createdAt: '2026-08-21T00:00:00.000Z',
+      recordedAt: '2026-08-21T00:00:00.000Z',
+      content: '可批量处理的中性候选一。',
+      visibility: 'personal' as const,
+      sourceMessageId: 'message-batch-1',
+      status: 'pending' as const,
+    }
+    const second = {
+      ...first,
+      id: 'candidate-batch-2',
+      observationId: 'observation-batch-2',
+      content: '需要单独解决冲突的中性候选二。',
+      sourceMessageId: 'message-batch-2',
+    }
+    const call = vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'memory/search') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          management: { schemaVersion: 1, records: [], candidates: [first, second], audit: [] },
+        },
+      }
+      if (endpoint === 'memory/batch') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          batch: {
+            schemaVersion: 1,
+            results: [
+              { candidateId: first.id, status: 'succeeded' as const },
+              { candidateId: second.id, status: 'failed' as const, code: 'MEMORY_CONFLICT_RESOLUTION_REQUIRED' },
+            ],
+          },
+        },
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab
+        rpc={{ call }}
+        useSessions={useSessions}
+        t={key => `translated:${key}`}
+      />)
+    })
+    await act(async () => {
+      for (const candidate of [first, second]) {
+        tree?.root.findByProps({
+          'aria-label': `translated:selectForMerge: ${candidate.id}`,
+        }).props.onChange({ target: { checked: true } })
+      }
+    })
+    const approve = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:batchApprove'))
+    if (approve === undefined) throw new Error('expected batch approve button')
+    await act(async () => {
+      approve.props.onClick()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenCalledWith(
+      '/dsh-mmem-settings',
+      'memory/batch',
+      expect.objectContaining({
+        sessionId: 'settings-session',
+        decisions: [
+          { candidateId: first.id, action: 'approve' },
+          { candidateId: second.id, action: 'approve' },
+        ],
+        requestId: expect.any(String),
+      }),
+      undefined,
+    )
+    const rendered = JSON.stringify(tree?.toJSON())
+    expect(rendered).toContain('MEMORY_CONFLICT_RESOLUTION_REQUIRED')
+    expect(rendered).toContain('translated:partialSuccess')
+  })
+
   it('renders pending Candidates from the governed management projection', async () => {
     const searchResponse = {
       ok: true,

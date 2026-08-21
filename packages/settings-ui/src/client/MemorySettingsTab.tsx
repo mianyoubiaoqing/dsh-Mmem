@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   createMemorySettingsClient,
   type MemoryAssessmentRpcSnapshotV1,
+  type MemoryBatchRpcSnapshotV1,
   type MemoryManagementRpcSnapshotV1,
   type MemorySettingsRpcCallerV1,
   type MemorySourceRpcSnapshotV1,
@@ -87,6 +88,7 @@ function SessionMemorySettingsTab({
   const [editDraft, setEditDraft] = useState<CandidateEditDraftV1>()
   const [mergeSelection, setMergeSelection] = useState<string[]>([])
   const [mergeDraft, setMergeDraft] = useState<CandidateMergeDraftV1>()
+  const [batchResult, setBatchResult] = useState<MemoryBatchRpcSnapshotV1['batch']>()
   const [filters, setFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
   const [appliedFilters, setAppliedFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
 
@@ -210,6 +212,25 @@ function SessionMemorySettingsTab({
       () => {
         setBusy(false)
         setMergeDraft(undefined)
+        setMergeSelection([])
+        setRefresh(value => value + 1)
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
+  const decideBatch = (action: 'approve' | 'reject'): void => {
+    if (busy || mergeSelection.length === 0) return
+    setBusy(true)
+    setFailed(false)
+    setBatchResult(undefined)
+    void client.batchDecide(mergeSelection.map(candidateId => ({ candidateId, action }))).then(
+      result => {
+        setBusy(false)
+        setBatchResult(result.batch)
         setMergeSelection([])
         setRefresh(value => value + 1)
       },
@@ -353,6 +374,16 @@ function SessionMemorySettingsTab({
           })
         }}
       >{t('mergeSelected')}</button>
+      <button
+        type="button"
+        disabled={busy || snapshot.activeSpace.access !== 'read-write' || mergeSelection.length === 0}
+        onClick={() => { decideBatch('approve') }}
+      >{t('batchApprove')}</button>
+      <button
+        type="button"
+        disabled={busy || snapshot.activeSpace.access !== 'read-write' || mergeSelection.length === 0}
+        onClick={() => { decideBatch('reject') }}
+      >{t('batchReject')}</button>
     </fieldset>
     {editDraft === undefined ? null : <fieldset>
       <legend>{t('editCandidate')}</legend>
@@ -440,6 +471,14 @@ function SessionMemorySettingsTab({
         <button type="submit" disabled={busy || mergeDraft.content.trim() === ''}>{t('saveMerge')}</button>
         <button type="button" disabled={busy} onClick={() => { setMergeDraft(undefined) }}>{t('cancel')}</button>
       </form>
+    </fieldset>}
+    {batchResult === undefined ? null : <fieldset>
+      <legend>{batchResult.results.some(result => result.status === 'failed')
+        ? t('partialSuccess')
+        : t('batchComplete')}</legend>
+      {batchResult.results.map(result => <small key={result.candidateId}>
+        {result.candidateId} · {result.status}{result.code === undefined ? '' : ` · ${result.code}`}
+      </small>)}
     </fieldset>}
     {sourceView === undefined ? null : <fieldset>
       <legend>{t('source')}</legend>
