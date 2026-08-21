@@ -98,6 +98,10 @@
     "./approval-review-dsh": {
       "types": "./lib/approval-review-dsh.d.ts",
       "default": "./lib/approval-review-dsh.js"
+    },
+    "./standalone-migration": {
+      "types": "./lib/standalone-migration.d.ts",
+      "default": "./lib/standalone-migration.js"
     }
   },
   "scripts": {

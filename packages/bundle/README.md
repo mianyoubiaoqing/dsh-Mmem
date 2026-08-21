@@ -4,6 +4,8 @@
 
 This alpha is a development preview. It supports Session-bound governed record/Candidate search, filtering, payload-free provenance, append-only Candidate editing/merge, manual review, partial-success batch decisions, exact DSH Workspace-to-Memory-Space bindings, a versioned `manual`/`scheduled-auto` policy editor, and a cancellable DST-aware local scheduler with cross-process lease and daily payload-free receipts. The bundled rc.8 Evaluator uses fresh no-tool DSH Agent Sessions, requires durable event receipts, and leaves all Archive authority in a governance runner that revalidates every trusted fact before automatic low-risk decisions. Scheduled review remains off until the Owner explicitly selects `scheduled-auto`. Cross-Space sharing is still incomplete.
 
+The bundle also exports the offline standalone migration Module. It provides content-free exact-digest planning, Owner-confirmed apply with an exact target backup, rollback rehearsal, and exact-generation rollback for eligible confirmed rows from the old MistyMoon SQLite store. It does not discover or create DSH Workspaces or Memory Spaces.
+
 ## Install after publication
 
 ```powershell
