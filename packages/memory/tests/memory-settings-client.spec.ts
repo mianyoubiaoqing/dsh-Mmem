@@ -522,4 +522,71 @@ describe('dsh-Mmem Settings browser client', () => {
       undefined,
     )
   })
+
+  it('replaces sharing policy without accepting Owner or DSH Workspace identity', async () => {
+    const call = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: 'space-target',
+          access: 'read-write',
+          bindingRevision: 'binding-sharing',
+        },
+        spaces: [
+          {
+            schemaVersion: 1,
+            id: 'space-source',
+            ownerId: 'owner-fixture',
+            name: 'Source',
+            createdAt: '2026-08-21T00:00:00.000Z',
+          },
+          {
+            schemaVersion: 1,
+            id: 'space-target',
+            ownerId: 'owner-fixture',
+            name: 'Target',
+            createdAt: '2026-08-21T00:00:00.000Z',
+          },
+        ],
+        sharingPolicy: {
+          schemaVersion: 1,
+          ownerId: 'owner-fixture',
+          revision: 'sharing-v2',
+          mode: 'selective',
+          grants: [{
+            id: 'grant-source-to-target',
+            sourceSpaceId: 'space-source',
+            targetSpaceId: 'space-target',
+            memoryKinds: ['summary'],
+            visibilities: ['personal'],
+          }],
+          federations: [],
+        },
+      },
+    })
+    const client = createMemorySettingsClient({ rpc: { call }, sessionId: 'settings-session' })
+    const update = {
+      expectedRevision: 'sharing-v1',
+      mode: 'selective' as const,
+      grants: [{
+        id: 'grant-source-to-target',
+        sourceSpaceId: 'space-source',
+        targetSpaceId: 'space-target',
+        memoryKinds: ['summary' as const],
+        visibilities: ['personal' as const],
+      }],
+      federations: [],
+    }
+
+    await expect(client.replaceSharingPolicy(update)).resolves.toMatchObject({
+      sharingPolicy: { revision: 'sharing-v2', mode: 'selective' },
+    })
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      '/dsh-mmem-settings',
+      'sharing/replace',
+      { sessionId: 'settings-session', ...update },
+      undefined,
+    )
+  })
 })

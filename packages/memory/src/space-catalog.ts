@@ -157,7 +157,8 @@ function isoTimestamp(value: unknown): string {
   return timestamp
 }
 
-function parseMemorySpaceV1(value: unknown): MemorySpaceV1 {
+/** Parse one untrusted Memory Space projection at RPC or persistence boundaries. */
+export function parseMemorySpaceV1(value: unknown): MemorySpaceV1 {
   if (!isObject(value) || !hasExactKeys(value, ['schemaVersion', 'id', 'ownerId', 'name', 'createdAt'])
     || value.schemaVersion !== 1) {
     throw new Error('invalid Memory Space Catalog space')

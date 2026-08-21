@@ -108,8 +108,10 @@ import {
   type MemorySpaceCatalogV1,
 } from './space-catalog.js'
 import {
+  createMemorySpaceSharingSettings,
   openMemorySpaceSharingCatalog,
   type MemorySpaceSharingCatalogV1,
+  type MemorySpaceSharingSettingsV1,
 } from './space-sharing.js'
 import {
   createMemoryGovernanceService,
@@ -232,6 +234,8 @@ declare module '@deepseek-ai/cordis' {
     dshMmemSpaceRouter: MemorySpaceArchiveRouterV1
     /** Owner-governed direct Grant/Federation recall authority. */
     dshMmemSpaceSharing: MemorySpaceSharingCatalogV1
+    /** Owner-bound sharing Settings facade; browser calls cannot select Owner. */
+    dshMmemSpaceSharingSettings: MemorySpaceSharingSettingsV1
     /** Loopback-only Settings governance resolved from a DSH Session Workspace. */
     dshMmemSpaceGovernance: MemorySpaceGovernanceResolverV1
   }
@@ -1999,12 +2003,19 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     ctx.effect(() => ctx.provide('mistymoonMemory', archive), 'mistymoon-memory: shared archive')
   }
   if (catalog !== undefined && router !== undefined) {
+    const governanceContext = trustedGovernanceContext(principalResolver(ctx))
     ctx.effect(() => ctx.provide('dshMmemSpaceCatalog', catalog), 'dsh-mmem: Memory Space Catalog')
     if (sharing !== undefined) {
       ctx.effect(() => ctx.provide('dshMmemSpaceSharing', sharing), 'dsh-mmem: Space sharing policy')
+      ctx.effect(
+        () => ctx.provide(
+          'dshMmemSpaceSharingSettings',
+          createMemorySpaceSharingSettings(governanceContext.ownerId, catalog, sharing),
+        ),
+        'dsh-mmem: Owner-bound Space sharing Settings',
+      )
     }
     ctx.effect(() => ctx.provide('dshMmemSpaceRouter', router), 'dsh-mmem: Space Archive Router')
-    const governanceContext = trustedGovernanceContext(principalResolver(ctx))
     ctx.effect(
       () => ctx.provide(
         'dshMmemSpaceGovernance',

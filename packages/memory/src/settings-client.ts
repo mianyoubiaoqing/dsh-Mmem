@@ -19,6 +19,14 @@ import {
   type MemoryApprovalPolicyUpdateV1,
   type MemoryApprovalPolicyV1,
 } from './approval-policy.js'
+import type { MemorySpaceV1 } from './space-catalog.js'
+import type {
+  InterSpaceModeV1,
+  MemorySpaceSharingSnapshotV1,
+  ReplaceMemorySpaceSharingPolicyRequestV1,
+  SpaceFederationV1,
+  SpaceShareGrantV1,
+} from './space-sharing.js'
 
 const SETTINGS_CHANNEL = '/dsh-mmem-settings'
 
@@ -113,6 +121,14 @@ export interface MemoryApprovalSettingsRpcSnapshotV1 {
   approvalPolicy: MemoryApprovalPolicyV1
 }
 
+/** Owner sharing policy and available Spaces bound to one authenticated Active Space. */
+export interface MemorySpaceSharingSettingsRpcSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  spaces: readonly MemorySpaceV1[]
+  sharingPolicy: MemorySpaceSharingSnapshotV1
+}
+
 /** Trusted browser state required to address one live DSH Session. */
 export interface MemorySettingsClientOptionsV1 {
   readonly rpc: MemorySettingsRpcCallerV1
@@ -162,6 +178,11 @@ export interface MemorySettingsClientV1 {
     update: MemoryApprovalPolicyUpdateV1,
     signal?: AbortSignal,
   ): Promise<MemoryApprovalSettingsRpcSnapshotV1>
+  getSharingPolicy(signal?: AbortSignal): Promise<MemorySpaceSharingSettingsRpcSnapshotV1>
+  replaceSharingPolicy(
+    update: Omit<ReplaceMemorySpaceSharingPolicyRequestV1, 'ownerId'>,
+    signal?: AbortSignal,
+  ): Promise<MemorySpaceSharingSettingsRpcSnapshotV1>
 }
 
 /** Stable client-side failure for RPC and response-boundary errors. */
@@ -179,6 +200,36 @@ export class MemorySettingsClientError extends Error {
 function nonEmpty(value: string, label: string): string {
   if (value.trim() === '') throw new TypeError(`${label} must be a non-empty string`)
   return value
+}
+
+function sharingMode(value: InterSpaceModeV1): InterSpaceModeV1 {
+  if (value !== 'isolated' && value !== 'selective' && value !== 'federated') {
+    throw new TypeError('sharing mode is unsupported')
+  }
+  return value
+}
+
+function sharingGrant(value: SpaceShareGrantV1): SpaceShareGrantV1 {
+  return {
+    id: nonEmpty(value.id, 'Space Share Grant id'),
+    sourceSpaceId: nonEmpty(value.sourceSpaceId, 'Source Space id'),
+    targetSpaceId: nonEmpty(value.targetSpaceId, 'Target Space id'),
+    memoryKinds: value.memoryKinds.map(parseMemoryKind),
+    visibilities: value.visibilities.map(visibility => {
+      if (visibility !== 'personal' && visibility !== 'confidential') {
+        throw new TypeError('Space Share Grant visibility is unsupported')
+      }
+      return visibility
+    }),
+  }
+}
+
+function sharingFederation(value: SpaceFederationV1): SpaceFederationV1 {
+  return {
+    id: nonEmpty(value.id, 'Space Federation id'),
+    name: nonEmpty(value.name, 'Space Federation name'),
+    spaceIds: value.spaceIds.map(id => nonEmpty(id, 'Space Federation member id')),
+  }
 }
 
 function exactObject(value: unknown, expected: readonly string[], label: string): Record<string, unknown> {
@@ -588,6 +639,112 @@ function approvalSettingsSnapshot(value: unknown): MemoryApprovalSettingsRpcSnap
   return value as MemoryApprovalSettingsRpcSnapshotV1
 }
 
+function memorySpaceProjection(value: unknown): MemorySpaceV1 {
+  const input = exactObject(
+    value,
+    ['schemaVersion', 'id', 'ownerId', 'name', 'createdAt'],
+    'Memory Space projection',
+  )
+  if (input.schemaVersion !== 1) throw new TypeError('Memory Space version is invalid')
+  for (const key of ['id', 'ownerId', 'name', 'createdAt'] as const) {
+    if (typeof input[key] !== 'string' || input[key].trim() === '') {
+      throw new TypeError(`Memory Space ${key} is invalid`)
+    }
+  }
+  validateMemoryValidity({ recordedAt: input.createdAt as string })
+  return value as MemorySpaceV1
+}
+
+function sharingPolicyProjection(value: unknown): MemorySpaceSharingSnapshotV1 {
+  const input = exactObject(
+    value,
+    ['schemaVersion', 'ownerId', 'revision', 'mode', 'grants', 'federations'],
+    'Memory Space sharing policy',
+  )
+  if (input.schemaVersion !== 1
+    || typeof input.ownerId !== 'string' || input.ownerId.trim() === ''
+    || typeof input.revision !== 'string' || input.revision.trim() === ''
+    || (input.mode !== 'isolated' && input.mode !== 'selective' && input.mode !== 'federated')
+    || !Array.isArray(input.grants) || input.grants.length > 10_000
+    || !Array.isArray(input.federations) || input.federations.length > 1_000) {
+    throw new TypeError('Memory Space sharing policy schema is invalid')
+  }
+  const grants = input.grants.map(item => {
+    const grant = exactObject(
+      item,
+      ['id', 'sourceSpaceId', 'targetSpaceId', 'memoryKinds', 'visibilities'],
+      'Space Share Grant',
+    )
+    if (typeof grant.id !== 'string' || grant.id.trim() === ''
+      || typeof grant.sourceSpaceId !== 'string' || grant.sourceSpaceId.trim() === ''
+      || typeof grant.targetSpaceId !== 'string' || grant.targetSpaceId.trim() === ''
+      || grant.sourceSpaceId === grant.targetSpaceId
+      || !Array.isArray(grant.memoryKinds) || grant.memoryKinds.length === 0
+      || !Array.isArray(grant.visibilities) || grant.visibilities.length === 0) {
+      throw new TypeError('Space Share Grant schema is invalid')
+    }
+    const memoryKinds = grant.memoryKinds.map(parseMemoryKind)
+    const visibilities = grant.visibilities.map(visibility => {
+      if (visibility !== 'personal' && visibility !== 'confidential') {
+        throw new TypeError('Space Share Grant visibility is invalid')
+      }
+      return visibility
+    })
+    if (new Set(memoryKinds).size !== memoryKinds.length
+      || new Set(visibilities).size !== visibilities.length) {
+      throw new TypeError('Space Share Grant filters must be unique')
+    }
+    return grant
+  })
+  const federations = input.federations.map(item => {
+    const federation = exactObject(item, ['id', 'name', 'spaceIds'], 'Space Federation')
+    if (typeof federation.id !== 'string' || federation.id.trim() === ''
+      || typeof federation.name !== 'string' || federation.name.trim() === ''
+      || !Array.isArray(federation.spaceIds) || federation.spaceIds.length < 2
+      || federation.spaceIds.some(spaceId => typeof spaceId !== 'string' || spaceId.trim() === '')
+      || new Set(federation.spaceIds).size !== federation.spaceIds.length) {
+      throw new TypeError('Space Federation schema is invalid')
+    }
+    return federation
+  })
+  const grantIds = grants.map(grant => grant.id)
+  const grantPairs = grants.map(grant => `${JSON.stringify(grant.sourceSpaceId)}:${JSON.stringify(grant.targetSpaceId)}`)
+  const federationIds = federations.map(federation => federation.id)
+  const federationMembers = federations.flatMap(federation => federation.spaceIds as string[])
+  if (new Set(grantIds).size !== grantIds.length
+    || new Set(grantPairs).size !== grantPairs.length
+    || new Set(federationIds).size !== federationIds.length
+    || new Set(federationMembers).size !== federationMembers.length) {
+    throw new TypeError('Memory Space sharing relations are ambiguous')
+  }
+  return value as MemorySpaceSharingSnapshotV1
+}
+
+function sharingSettingsSnapshot(value: unknown): MemorySpaceSharingSettingsRpcSnapshotV1 {
+  const input = exactObject(
+    value,
+    ['schemaVersion', 'activeSpace', 'spaces', 'sharingPolicy'],
+    'Memory Space sharing settings snapshot',
+  )
+  if (input.schemaVersion !== 1 || !Array.isArray(input.spaces) || input.spaces.length > 1_000) {
+    throw new MemorySettingsClientError('invalid-response', 'Memory Space sharing settings have an invalid schema')
+  }
+  activeSpaceReceipt(input.activeSpace)
+  try {
+    const spaces = input.spaces.map(memorySpaceProjection)
+    const policy = sharingPolicyProjection(input.sharingPolicy)
+    if (spaces.some(space => space.ownerId !== policy.ownerId)
+      || new Set(spaces.map(space => space.id)).size !== spaces.length) {
+      throw new TypeError('Memory Space sharing projection has inconsistent Spaces')
+    }
+  } catch (error) {
+    throw new MemorySettingsClientError('invalid-response', 'Memory Space sharing settings contain invalid data', {
+      cause: error,
+    })
+  }
+  return value as MemorySpaceSharingSettingsRpcSnapshotV1
+}
+
 /** Create a Session-bound client that never accepts Owner or Workspace identity from the browser. */
 export function createMemorySettingsClient(options: MemorySettingsClientOptionsV1): MemorySettingsClientV1 {
   const selection = {
@@ -699,6 +856,18 @@ export function createMemorySettingsClient(options: MemorySettingsClientOptionsV
         ...(update.mode === 'scheduled-auto'
           ? { timeZone: update.timeZone, localTime: update.localTime }
           : {}),
+      }, signal))
+    },
+    async getSharingPolicy(signal) {
+      return sharingSettingsSnapshot(await call('sharing/get', selection, signal))
+    },
+    async replaceSharingPolicy(update, signal) {
+      return sharingSettingsSnapshot(await call('sharing/replace', {
+        ...selection,
+        expectedRevision: nonEmpty(update.expectedRevision, 'sharing expectedRevision'),
+        mode: sharingMode(update.mode),
+        grants: update.grants.map(sharingGrant),
+        federations: update.federations.map(sharingFederation),
       }, signal))
     },
   }

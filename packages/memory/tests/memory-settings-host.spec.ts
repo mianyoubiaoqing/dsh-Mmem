@@ -46,6 +46,7 @@ describe('dsh-Mmem Settings Host RPC', () => {
   await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
     await ctx.plugin(MemoryPlugin, {
       spaceCatalogPath: join(root, 'catalog.json'),
+      spaceSharingPath: join(root, 'sharing.json'),
       spacesRoot: join(root, 'spaces'),
       settingsPath: join(root, 'settings', 'settings.json'),
     })
@@ -121,6 +122,75 @@ describe('dsh-Mmem Settings Host RPC', () => {
       spaceId: readOnlySpace.id,
       access: 'read',
       defaultWrite: false,
+    })
+    await expect(registration.handler('sharing/get', {
+      sessionId: String(session.id),
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: { spaceId: space.id, bindingRevision: binding.revision },
+        spaces: [
+          { id: space.id, name: 'Project Alpha' },
+          { id: readOnlySpace.id, name: 'Read Only Policy Receipt' },
+        ],
+        sharingPolicy: { revision: '0', mode: 'isolated', grants: [], federations: [] },
+      },
+    })
+    await expect(registration.handler('sharing/replace', {
+      sessionId: String(session.id),
+      expectedRevision: '0',
+      mode: 'selective',
+      grants: [{
+        id: 'grant-read-only-to-project',
+        sourceSpaceId: readOnlySpace.id,
+        targetSpaceId: space.id,
+        memoryKinds: ['summary'],
+        visibilities: ['personal'],
+      }],
+      federations: [],
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        activeSpace: { spaceId: space.id },
+        sharingPolicy: {
+          revision: expect.not.stringMatching(/^0$/u),
+          mode: 'selective',
+          grants: [{ id: 'grant-read-only-to-project' }],
+        },
+      },
+    })
+    await expect(registration.handler('sharing/replace', {
+      sessionId: String(session.id),
+      ownerId: 'browser-must-not-select-owner',
+      expectedRevision: '0',
+      mode: 'isolated',
+      grants: [],
+      federations: [],
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'bad-request' },
+    })
+    await expect(registration.handler('sharing/replace', {
+      sessionId: String(session.id),
+      expectedRevision: '0',
+      mode: 'isolated',
+      grants: [],
+      federations: [],
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'settings-revision-conflict' },
+    })
+    await expect(registration.handler('sharing/replace', {
+      sessionId: String(session.id),
+      requestedSpaceId: readOnlySpace.id,
+      expectedRevision: 'stale-is-irrelevant-for-read-only',
+      mode: 'isolated',
+      grants: [],
+      federations: [],
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'bad-request', message: expect.stringContaining('read-write') },
     })
     await expect(registration.handler('settings/approval', {
       sessionId: String(session.id),

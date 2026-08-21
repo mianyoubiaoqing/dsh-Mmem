@@ -17,9 +17,15 @@ import type {
   MemoryCandidateRevisionRpcSnapshotV1,
   MemoryManagementRpcSnapshotV1,
   MemorySourceRpcSnapshotV1,
+  MemorySpaceSharingSettingsRpcSnapshotV1,
 } from './settings-client.js'
 import type { MemorySpaceGovernanceSessionV1 } from './space-governance.js'
 import { MemoryRuntimeSettingsError, type MemoryApprovalPolicyUpdateV1 } from './runtime-settings.js'
+import {
+  MemorySpaceSharingError,
+  type MemorySpaceSharingSettingsV1,
+  type ReplaceMemorySpaceSharingPolicyRequestV1,
+} from './space-sharing.js'
 
 export type {
   MemoryAssessmentRpcSnapshotV1,
@@ -31,6 +37,7 @@ export type {
   MemoryCandidateRevisionRpcSnapshotV1,
   MemoryManagementRpcSnapshotV1,
   MemorySourceRpcSnapshotV1,
+  MemorySpaceSharingSettingsRpcSnapshotV1,
 } from './settings-client.js'
 
 /** Cordis plugin name for the standalone Memory Settings Host. */
@@ -380,6 +387,44 @@ function memoryApprovalUpdate(value: unknown): MemoryApprovalUpdateInput | undef
   }
 }
 
+type MemorySharingUpdateInput = {
+  sessionId: SessionId
+  requestedSpaceId?: string
+  update: Omit<ReplaceMemorySpaceSharingPolicyRequestV1, 'ownerId'>
+}
+
+function memorySharingUpdate(value: unknown): MemorySharingUpdateInput | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const keys = [
+    'sessionId',
+    ...(input.requestedSpaceId === undefined ? [] : ['requestedSpaceId']),
+    'expectedRevision',
+    'mode',
+    'grants',
+    'federations',
+  ]
+  if (!exactObject(value, keys)
+    || typeof input.sessionId !== 'string' || input.sessionId.trim() === ''
+    || (input.requestedSpaceId !== undefined
+      && (typeof input.requestedSpaceId !== 'string' || input.requestedSpaceId.trim() === ''))
+    || typeof input.expectedRevision !== 'string' || input.expectedRevision.trim() === ''
+    || (input.mode !== 'isolated' && input.mode !== 'selective' && input.mode !== 'federated')
+    || !Array.isArray(input.grants) || !Array.isArray(input.federations)) {
+    return undefined
+  }
+  return {
+    sessionId: SessionId(input.sessionId),
+    ...(input.requestedSpaceId === undefined ? {} : { requestedSpaceId: input.requestedSpaceId as string }),
+    update: {
+      expectedRevision: input.expectedRevision,
+      mode: input.mode,
+      grants: input.grants as ReplaceMemorySpaceSharingPolicyRequestV1['grants'],
+      federations: input.federations as ReplaceMemorySpaceSharingPolicyRequestV1['federations'],
+    },
+  }
+}
+
 function activeSpaceReceipt(governance: MemorySpaceGovernanceSessionV1) {
   return {
     spaceId: governance.spaceId,
@@ -402,7 +447,9 @@ export function apply(ctx: Context): void {
         && endpoint !== 'memory/merge'
         && endpoint !== 'memory/batch'
         && endpoint !== 'settings/get'
-        && endpoint !== 'settings/approval') {
+        && endpoint !== 'settings/approval'
+        && endpoint !== 'sharing/get'
+        && endpoint !== 'sharing/replace') {
         return badRequest('Unknown dsh-Mmem Settings operation.')
       }
       const decision = endpoint === 'candidates/approve' || endpoint === 'candidates/reject'
@@ -416,13 +463,15 @@ export function apply(ctx: Context): void {
         : undefined
       const batch = endpoint === 'memory/batch' ? memoryBatch(payload) : undefined
       const approvalUpdate = endpoint === 'settings/approval' ? memoryApprovalUpdate(payload) : undefined
-      const selection = endpoint === 'candidates/list' || endpoint === 'settings/get'
+      const sharingUpdate = endpoint === 'sharing/replace' ? memorySharingUpdate(payload) : undefined
+      const selection = endpoint === 'candidates/list' || endpoint === 'settings/get' || endpoint === 'sharing/get'
         ? sessionSelection(payload)
-        : decision ?? search ?? source ?? assessment ?? revision ?? batch ?? approvalUpdate
+        : decision ?? search ?? source ?? assessment ?? revision ?? batch ?? approvalUpdate ?? sharingUpdate
       if (selection === undefined) {
-        if (endpoint === 'candidates/list' || endpoint === 'settings/get') {
+        if (endpoint === 'candidates/list' || endpoint === 'settings/get' || endpoint === 'sharing/get') {
           return badRequest('Candidate listing requires one live DSH sessionId and an optional requestedSpaceId.')
         }
+        if (endpoint === 'sharing/replace') return badRequest('Memory Space sharing policy update is invalid.')
         if (endpoint === 'settings/approval') return badRequest('Memory approval policy update is invalid.')
         if (endpoint === 'memory/search') return badRequest('Memory search filters are invalid.')
         if (endpoint === 'memory/source') return badRequest('Memory source selection is invalid.')
@@ -454,6 +503,32 @@ export function apply(ctx: Context): void {
             ? {}
             : { requestedSpaceId: selection.requestedSpaceId }),
         })
+        if (endpoint === 'sharing/get' || sharingUpdate !== undefined) {
+          if (sharingUpdate !== undefined && governance.access !== 'read-write') {
+            return badRequest('Memory Space sharing policy updates require a read-write Active Space Binding.')
+          }
+          const sharingSettings = ctx.get('dshMmemSpaceSharingSettings') as MemorySpaceSharingSettingsV1 | undefined
+          if (sharingSettings === undefined) {
+            return {
+              ok: false,
+              error: {
+                code: 'settings-not-configured',
+                message: 'Memory Space sharing is not configured.',
+                details: {},
+              },
+            }
+          }
+          const settings = sharingUpdate === undefined
+            ? await sharingSettings.inspect()
+            : await sharingSettings.replacePolicy(sharingUpdate.update)
+          const value: MemorySpaceSharingSettingsRpcSnapshotV1 = {
+            schemaVersion: 1,
+            activeSpace: activeSpaceReceipt(governance),
+            spaces: settings.spaces,
+            sharingPolicy: settings.sharingPolicy,
+          }
+          return { ok: true, value }
+        }
         if (endpoint === 'settings/get' || approvalUpdate !== undefined) {
           if (approvalUpdate !== undefined && governance.access !== 'read-write') {
             return badRequest('Memory approval policy updates require a read-write Active Space Binding.')
@@ -564,6 +639,17 @@ export function apply(ctx: Context): void {
               code: error.code === 'SETTINGS_REVISION_CONFLICT'
                 ? 'settings-revision-conflict'
                 : 'settings-not-configured',
+              message: error.message,
+              details: {},
+            },
+          }
+        }
+        if (error instanceof MemorySpaceSharingError
+          && error.code === 'MEMORY_SPACE_SHARING_REVISION_MISMATCH') {
+          return {
+            ok: false,
+            error: {
+              code: 'settings-revision-conflict',
               message: error.message,
               details: {},
             },

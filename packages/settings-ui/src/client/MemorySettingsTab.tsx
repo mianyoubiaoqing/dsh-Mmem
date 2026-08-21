@@ -8,10 +8,16 @@ import {
   type MemoryBatchRpcSnapshotV1,
   type MemoryManagementRpcSnapshotV1,
   type MemorySettingsRpcCallerV1,
+  type MemorySpaceSharingSettingsRpcSnapshotV1,
   type MemorySourceRpcSnapshotV1,
 } from '@mistymoon/dsh-memory/settings-client'
 import type { MemoryCandidate, MemoryVisibility } from '@mistymoon/dsh-memory/contracts'
 import type { MemoryKind } from '@mistymoon/dsh-memory/domain'
+import type {
+  InterSpaceModeV1,
+  SpaceFederationV1,
+  SpaceShareGrantV1,
+} from '@mistymoon/dsh-memory/space-sharing'
 import type { MemorySettingsLocaleKey } from './locales.js'
 
 /** Minimal Session-list projection supplied by DSH's global slot standard props. */
@@ -53,6 +59,24 @@ interface ApprovalPolicyDraftV1 {
   mode: 'manual' | 'scheduled-auto'
   timeZone: string
   localTime: string
+}
+
+interface SharingPolicyDraftV1 {
+  mode: InterSpaceModeV1
+  grants: SpaceShareGrantV1[]
+  federations: SpaceFederationV1[]
+}
+
+interface GrantDraftV1 {
+  sourceSpaceId: string
+  targetSpaceId: string
+  memoryKinds: MemoryKind[]
+  visibilities: MemoryVisibility[]
+}
+
+interface FederationDraftV1 {
+  name: string
+  spaceIds: string[]
 }
 
 const MEMORY_KINDS: readonly MemoryKind[] = [
@@ -98,8 +122,21 @@ function SessionMemorySettingsTab({
   const [batchResult, setBatchResult] = useState<MemoryBatchRpcSnapshotV1['batch']>()
   const [approvalSettings, setApprovalSettings] = useState<MemoryApprovalSettingsRpcSnapshotV1>()
   const [approvalDraft, setApprovalDraft] = useState<ApprovalPolicyDraftV1>()
+  const [sharingSettings, setSharingSettings] = useState<MemorySpaceSharingSettingsRpcSnapshotV1>()
+  const [sharingDraft, setSharingDraft] = useState<SharingPolicyDraftV1>()
+  const [grantDraft, setGrantDraft] = useState<GrantDraftV1>()
+  const [federationDraft, setFederationDraft] = useState<FederationDraftV1>({ name: '', spaceIds: [] })
   const [filters, setFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
   const [appliedFilters, setAppliedFilters] = useState<MemoryFilterStateV1>(DEFAULT_FILTERS)
+
+  useEffect(() => {
+    setApprovalSettings(undefined)
+    setApprovalDraft(undefined)
+    setSharingSettings(undefined)
+    setSharingDraft(undefined)
+    setGrantDraft(undefined)
+    setFederationDraft({ name: '', spaceIds: [] })
+  }, [client])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -300,6 +337,106 @@ function SessionMemorySettingsTab({
     )
   }
 
+  const openSharingSettings = (): void => {
+    if (busy) return
+    setBusy(true)
+    setFailed(false)
+    void client.getSharingPolicy().then(
+      result => {
+        const first = result.spaces[0]?.id ?? ''
+        const target = result.spaces.find(space => space.id === result.activeSpace.spaceId)?.id
+          ?? result.spaces.find(space => space.id !== first)?.id
+          ?? first
+        setBusy(false)
+        setSharingSettings(result)
+        setSharingDraft({
+          mode: result.sharingPolicy.mode,
+          grants: result.sharingPolicy.grants.map(grant => ({
+            ...grant,
+            memoryKinds: [...grant.memoryKinds],
+            visibilities: [...grant.visibilities],
+          })),
+          federations: result.sharingPolicy.federations.map(federation => ({
+            ...federation,
+            spaceIds: [...federation.spaceIds],
+          })),
+        })
+        setGrantDraft({
+          sourceSpaceId: result.spaces.find(space => space.id !== target)?.id ?? first,
+          targetSpaceId: target,
+          memoryKinds: ['summary'],
+          visibilities: ['personal'],
+        })
+        setFederationDraft({ name: '', spaceIds: [] })
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
+  const addGrant = (): void => {
+    if (sharingDraft === undefined || grantDraft === undefined
+      || grantDraft.sourceSpaceId === '' || grantDraft.targetSpaceId === ''
+      || grantDraft.sourceSpaceId === grantDraft.targetSpaceId
+      || grantDraft.memoryKinds.length === 0 || grantDraft.visibilities.length === 0
+      || sharingDraft.grants.some(grant => grant.sourceSpaceId === grantDraft.sourceSpaceId
+        && grant.targetSpaceId === grantDraft.targetSpaceId)) return
+    setSharingDraft(value => value === undefined ? value : {
+      ...value,
+      grants: [...value.grants, {
+        id: `grant-${crypto.randomUUID()}`,
+        sourceSpaceId: grantDraft.sourceSpaceId,
+        targetSpaceId: grantDraft.targetSpaceId,
+        memoryKinds: [...grantDraft.memoryKinds],
+        visibilities: [...grantDraft.visibilities],
+      }],
+    })
+  }
+
+  const addFederation = (): void => {
+    if (sharingDraft === undefined || federationDraft.name.trim() === ''
+      || federationDraft.spaceIds.length < 2
+      || sharingDraft.federations.some(federation => federation.spaceIds
+        .some(spaceId => federationDraft.spaceIds.includes(spaceId)))) return
+    setSharingDraft(value => value === undefined ? value : {
+      ...value,
+      federations: [...value.federations, {
+        id: `federation-${crypto.randomUUID()}`,
+        name: federationDraft.name.trim(),
+        spaceIds: [...federationDraft.spaceIds],
+      }],
+    })
+    setFederationDraft({ name: '', spaceIds: [] })
+  }
+
+  const saveSharingSettings = (): void => {
+    if (busy || sharingSettings === undefined || sharingDraft === undefined) return
+    setBusy(true)
+    setFailed(false)
+    void client.replaceSharingPolicy({
+      expectedRevision: sharingSettings.sharingPolicy.revision,
+      mode: sharingDraft.mode,
+      grants: sharingDraft.grants,
+      federations: sharingDraft.federations,
+    }).then(
+      result => {
+        setBusy(false)
+        setSharingSettings(result)
+        setSharingDraft({
+          mode: result.sharingPolicy.mode,
+          grants: result.sharingPolicy.grants.map(grant => ({ ...grant, memoryKinds: [...grant.memoryKinds], visibilities: [...grant.visibilities] })),
+          federations: result.sharingPolicy.federations.map(federation => ({ ...federation, spaceIds: [...federation.spaceIds] })),
+        })
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
   if (failed) return <p role="alert">{t('loadError')}</p>
   if (snapshot === undefined) return <p role="status">{t('loading')}</p>
   return <section className="dsh-mmem-settings">
@@ -307,6 +444,9 @@ function SessionMemorySettingsTab({
     <p>{snapshot.activeSpace.spaceId} · {snapshot.activeSpace.access}</p>
     <button type="button" disabled={busy} onClick={openApprovalSettings}>
       {t('configureApproval')}
+    </button>
+    <button type="button" disabled={busy} onClick={openSharingSettings}>
+      {t('configureSharing')}
     </button>
     <form onSubmit={(event) => {
       event.preventDefault()
@@ -409,6 +549,134 @@ function SessionMemorySettingsTab({
             setApprovalDraft(undefined)
           }}
         >{t('cancel')}</button>
+      </form>
+    </fieldset>}
+    {sharingSettings === undefined || sharingDraft === undefined || grantDraft === undefined ? null : <fieldset>
+      <legend>{t('sharingSettings')}</legend>
+      <small>{t('policyRevision')}: {sharingSettings.sharingPolicy.revision}</small>
+      <form
+        aria-label={t('sharingForm')}
+        onSubmit={(event) => {
+          event.preventDefault()
+          saveSharingSettings()
+        }}
+      >
+        <select
+          aria-label={t('sharingMode')}
+          value={sharingDraft.mode}
+          onChange={event => {
+            setSharingDraft(value => value === undefined
+              ? value
+              : { ...value, mode: event.target.value as InterSpaceModeV1 })
+          }}
+        >
+          <option value="isolated">isolated</option>
+          <option value="selective">selective</option>
+          <option value="federated">federated</option>
+        </select>
+        {sharingDraft.mode === 'selective' ? <fieldset>
+          <legend>{t('spaceShareGrants')}</legend>
+          <select
+            aria-label={t('sourceSpace')}
+            value={grantDraft.sourceSpaceId}
+            onChange={event => { setGrantDraft(value => value === undefined ? value : { ...value, sourceSpaceId: event.target.value }) }}
+          >
+            {sharingSettings.spaces.map(space => <option key={space.id} value={space.id}>{space.name}</option>)}
+          </select>
+          <select
+            aria-label={t('targetSpace')}
+            value={grantDraft.targetSpaceId}
+            onChange={event => { setGrantDraft(value => value === undefined ? value : { ...value, targetSpaceId: event.target.value }) }}
+          >
+            {sharingSettings.spaces.map(space => <option key={space.id} value={space.id}>{space.name}</option>)}
+          </select>
+          {MEMORY_KINDS.map(kind => <label key={kind}>
+            <input
+              type="checkbox"
+              aria-label={`${t('sharedMemoryKind')}: ${kind}`}
+              checked={grantDraft.memoryKinds.includes(kind)}
+              onChange={event => {
+                setGrantDraft(value => value === undefined ? value : {
+                  ...value,
+                  memoryKinds: event.target.checked
+                    ? [...value.memoryKinds, kind]
+                    : value.memoryKinds.filter(item => item !== kind),
+                })
+              }}
+            />{kind}
+          </label>)}
+          {(['personal', 'confidential'] as const).map(visibility => <label key={visibility}>
+            <input
+              type="checkbox"
+              aria-label={`${t('sharedVisibility')}: ${visibility}`}
+              checked={grantDraft.visibilities.includes(visibility)}
+              onChange={event => {
+                setGrantDraft(value => value === undefined ? value : {
+                  ...value,
+                  visibilities: event.target.checked
+                    ? [...value.visibilities, visibility]
+                    : value.visibilities.filter(item => item !== visibility),
+                })
+              }}
+            />{visibility}
+          </label>)}
+          <button type="button" disabled={busy || sharingSettings.activeSpace.access !== 'read-write'} onClick={addGrant}>
+            {t('addGrant')}
+          </button>
+          {sharingDraft.grants.map(grant => <p key={grant.id}>
+            {grant.sourceSpaceId} → {grant.targetSpaceId}
+            <button type="button" disabled={busy} onClick={() => {
+              setSharingDraft(value => value === undefined ? value : {
+                ...value,
+                grants: value.grants.filter(item => item.id !== grant.id),
+              })
+            }}>{t('remove')}</button>
+          </p>)}
+        </fieldset> : null}
+        {sharingDraft.mode === 'federated' ? <fieldset>
+          <legend>{t('spaceFederations')}</legend>
+          <input
+            type="text"
+            aria-label={t('federationName')}
+            value={federationDraft.name}
+            onChange={event => { setFederationDraft(value => ({ ...value, name: event.target.value })) }}
+          />
+          {sharingSettings.spaces.map(space => <label key={space.id}>
+            <input
+              type="checkbox"
+              aria-label={`${t('federationMember')}: ${space.id}`}
+              checked={federationDraft.spaceIds.includes(space.id)}
+              onChange={event => {
+                setFederationDraft(value => ({
+                  ...value,
+                  spaceIds: event.target.checked
+                    ? [...value.spaceIds, space.id]
+                    : value.spaceIds.filter(id => id !== space.id),
+                }))
+              }}
+            />{space.name}
+          </label>)}
+          <button type="button" disabled={busy || sharingSettings.activeSpace.access !== 'read-write'} onClick={addFederation}>
+            {t('addFederation')}
+          </button>
+          {sharingDraft.federations.map(federation => <p key={federation.id}>
+            {federation.name}: {federation.spaceIds.join(', ')}
+            <button type="button" disabled={busy} onClick={() => {
+              setSharingDraft(value => value === undefined ? value : {
+                ...value,
+                federations: value.federations.filter(item => item.id !== federation.id),
+              })
+            }}>{t('remove')}</button>
+          </p>)}
+        </fieldset> : null}
+        <button type="submit" disabled={busy || sharingSettings.activeSpace.access !== 'read-write'}>
+          {t('saveSharing')}
+        </button>
+        <button type="button" disabled={busy} onClick={() => {
+          setSharingSettings(undefined)
+          setSharingDraft(undefined)
+          setGrantDraft(undefined)
+        }}>{t('cancel')}</button>
       </form>
     </fieldset>}
     <fieldset>
