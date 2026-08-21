@@ -1,6 +1,6 @@
 # `@mistymoon/dsh-mmem` 0.0.1-alpha.0 发行验收
 
-> 验收日期：2026-08-21  
+> 验收日期：2026-08-21
 > npm 边界：只生成 tarball；登录、token、`npm publish`、dist-tag 与 Release 由 Owner 手动执行。
 
 ## DSH 兼容性

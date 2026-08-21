@@ -1,8 +1,8 @@
 # DSH 记忆插件生态与 dsh-Mmem 开源判断
 
-> 调研时点：2026-08-21（Asia/Shanghai）  
-> 项目基线：独立 `dsh-Mmem` 仓库，DSH 完整验证基线 `0.1.0-rc.8`，公开 peer range `>=0.1.0-rc.7 <0.1.0`。  
-> 证据边界：优先使用官方仓库、manifest、release、npm registry/API 和官方文档；未把 README 自述等同于逐项黑盒复测。  
+> 调研时点：2026-08-21（Asia/Shanghai）
+> 项目基线：独立 `dsh-Mmem` 仓库，DSH 完整验证基线 `0.1.0-rc.8`，公开 peer range `>=0.1.0-rc.7 <0.1.0`。
+> 证据边界：优先使用官方仓库、manifest、release、npm registry/API 和官方文档；未把 README 自述等同于逐项黑盒复测。
 > 隐私边界：调研未读取真实 Persona、Memory、DSH Home、会话或凭据。
 
 ## 结论
