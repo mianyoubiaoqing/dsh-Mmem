@@ -9,6 +9,7 @@ import type {
   MemorySemanticRelationshipTypeV1,
 } from '../contracts.js'
 import { parseCandidateExtractionReceiptV1 } from '../candidate-extraction.js'
+import { parseMemoryTurnEvidenceCapsuleV1, type MemoryTurnEvidenceCapsuleV1 } from '../turn-evidence.js'
 import {
   memoryScopeEquals,
   memorySourceKey,
@@ -63,6 +64,18 @@ export interface MemoryLifecycleEvent {
   sourceMessageId: string
 }
 
+export interface MemoryTurnEvidenceEvent {
+  schemaVersion: 2
+  event: 'turn-evidence'
+  id: string
+  createdAt: string
+  ownerId: string
+  scope: MemoryScopeV1
+  observationId: string
+  candidateId: string
+  capsule: MemoryTurnEvidenceCapsuleV1
+}
+
 export interface MemoryRelationshipConfirmedEvent {
   schemaVersion: 2
   event: 'relationship-confirmed'
@@ -80,7 +93,7 @@ export interface MemoryRelationshipConfirmedEvent {
 
 export type MemoryDomainEvent = MemoryObservationV1 | MemoryRecord | MemoryCandidate
   | MemoryForgottenEvent | MemoryCandidateResolutionEvent | MemoryLifecycleEvent
-  | MemoryRelationshipConfirmedEvent
+  | MemoryRelationshipConfirmedEvent | MemoryTurnEvidenceEvent
 
 export type ArchiveIssueCode =
   | 'trailing-partial-transaction'
@@ -139,6 +152,7 @@ export interface FoldedMemoryState {
   candidates: MemoryCandidate[]
   byId: Map<string, MemoryRecord>
   candidateById: Map<string, MemoryCandidate>
+  turnEvidenceByCandidateId: Map<string, MemoryTurnEvidenceCapsuleV1>
   relationships: ConfirmedMemoryRelationshipV1[]
   relationshipById: Map<string, ConfirmedMemoryRelationshipV1>
   observations: Map<string, MemoryObservationV1>
@@ -260,6 +274,7 @@ export class MemoryArchiveError extends Error {
       | 'MEMORY_CONFLICT_DECISION_REQUIRED'
       | 'MEMORY_CONFLICT_TARGET_INVALID'
       | 'MEMORY_RELATIONSHIP_TARGET_INVALID'
+      | 'MEMORY_CANDIDATE_EXPIRED'
       | 'MEMORY_ARCHIVE_DISPOSED'
       | 'MEMORY_DISPOSE_TIMEOUT',
     options?: ErrorOptions,
@@ -416,6 +431,10 @@ function timestamp(value: unknown): string {
   return validateMemoryValidity({ recordedAt: requiredString(value) }).recordedAt
 }
 
+function defaultCandidateExpiry(createdAt: string): string {
+  return new Date(Date.parse(createdAt) + 24 * 60 * 60 * 1_000).toISOString()
+}
+
 function visibility(value: unknown): 'personal' | 'confidential' {
   if (value !== 'personal' && value !== 'confidential') throw new Error('unsupported visibility')
   return value
@@ -567,6 +586,23 @@ function parseDomainEvent(value: unknown, line: number, offset: number): MemoryD
         sourceMessageId: requiredString(entry.sourceMessageId),
       }
     }
+    if (entry.event === 'turn-evidence') {
+      exactDomainKeys(entry, [
+        'schemaVersion', 'event', 'id', 'createdAt', 'ownerId', 'scope', 'observationId',
+        'candidateId', 'capsule',
+      ])
+      return {
+        schemaVersion: 2,
+        event: 'turn-evidence',
+        id: requiredString(entry.id),
+        createdAt: timestamp(entry.createdAt),
+        ownerId: requiredString(entry.ownerId),
+        scope: parseMemoryScopeV1(entry.scope),
+        observationId: requiredString(entry.observationId),
+        candidateId: requiredString(entry.candidateId),
+        capsule: parseMemoryTurnEvidenceCapsuleV1(entry.capsule),
+      }
+    }
     if (entry.event === 'relationship-confirmed') {
       exactDomainKeys(entry, [
         'schemaVersion', 'event', 'id', 'createdAt', 'ownerId', 'scope', 'observationId',
@@ -640,7 +676,9 @@ function parseDomainEvent(value: unknown, line: number, offset: number): MemoryD
       sourceMessageId: requiredString(entry.sourceMessageId),
     }
     if (entry.event === 'candidate') {
-      exactDomainKeys(entry, [...commonRequired, 'event'], ['validFrom', 'validTo', 'extraction', 'sourceCandidateIds'])
+      exactDomainKeys(entry, [...commonRequired, 'event'], [
+        'validFrom', 'validTo', 'extraction', 'sourceCandidateIds', 'expiresAt', 'turnEvidenceAvailable',
+      ])
       if (entry.status !== 'pending') throw new Error('candidate must start pending')
       let sourceCandidateIds: string[] | undefined
       if (entry.sourceCandidateIds !== undefined) {
@@ -666,6 +704,14 @@ function parseDomainEvent(value: unknown, line: number, offset: number): MemoryD
         ...common,
         event: 'candidate',
         status: 'pending',
+        expiresAt: entry.expiresAt === undefined
+          ? defaultCandidateExpiry(common.createdAt)
+          : timestamp(entry.expiresAt),
+        ...(entry.turnEvidenceAvailable === undefined
+          ? {}
+          : entry.turnEvidenceAvailable === true
+            ? { turnEvidenceAvailable: true as const }
+            : (() => { throw new Error('turnEvidenceAvailable must equal true') })()),
         ...(sourceCandidateIds === undefined ? {} : { sourceCandidateIds }),
         ...(extraction === undefined ? {} : { extraction }),
       }
@@ -704,6 +750,7 @@ function emptyState(): FoldedMemoryState {
     candidates: [],
     byId: new Map(),
     candidateById: new Map(),
+    turnEvidenceByCandidateId: new Map(),
     relationships: [],
     relationshipById: new Map(),
     observations: new Map(),
@@ -745,6 +792,11 @@ export function cloneFoldedState(source: FoldedMemoryState): FoldedMemoryState {
     candidates,
     byId: new Map(records.map(memory => [memory.id, memory])),
     candidateById: new Map(candidates.map(candidate => [candidate.id, candidate])),
+    turnEvidenceByCandidateId: new Map([...source.turnEvidenceByCandidateId].map(([id, capsule]) => [id, {
+      ...capsule,
+      userMessages: capsule.userMessages.map(message => ({ ...message })),
+      assistantMessage: { ...capsule.assistantMessage },
+    }])),
     relationships,
     relationshipById: new Map(relationships.map(relationship => [relationship.id, relationship])),
     observations: new Map([...source.observations].map(([id, observation]) => [id, {
@@ -904,6 +956,19 @@ function foldEvent(
     state.relationshipById.set(relationship.id, relationship)
     return
   }
+  if ('event' in event && event.event === 'turn-evidence') {
+    eventObservation(state, event, line, offset)
+    const candidate = state.candidateById.get(event.candidateId)
+    if (candidate === undefined || candidate.status !== 'pending'
+      || candidate.turnEvidenceAvailable !== true
+      || candidate.ownerId !== event.ownerId
+      || !memoryScopeEquals(candidate.scope, event.scope)
+      || state.turnEvidenceByCandidateId.has(candidate.id)) {
+      issue('invalid-state-transition', line, offset)
+    }
+    state.turnEvidenceByCandidateId.set(candidate.id, event.capsule)
+    return
+  }
   if ('event' in event && event.event === 'candidate') {
     const { sourceKey } = eventObservation(state, event, line, offset)
     if (event.sourceCandidateIds !== undefined) {
@@ -959,6 +1024,7 @@ function foldEvent(
         || source.candidateId !== replacement.id) issue('invalid-state-transition', line, offset)
       candidate.status = 'superseded'
     }
+    state.turnEvidenceByCandidateId.delete(candidate.id)
     return
   }
   const memory = event
@@ -1485,6 +1551,7 @@ export function migrateLegacyArchiveToScopedBytes(
           schemaVersion: 2, event: 'candidate', id: legacy.id, ownerId: policy.ownerId, scope: policy.scope,
           observationId: observation.id, memoryKind: policy.memoryKind,
           createdAt: timestamp(legacy.createdAt), recordedAt: timestamp(legacy.createdAt),
+          expiresAt: defaultCandidateExpiry(timestamp(legacy.createdAt)),
           content: legacy.content, visibility: legacy.visibility, sourceMessageId: legacy.sourceMessageId,
           status: 'pending',
         })

@@ -62,9 +62,15 @@ function localTime(value: unknown): string {
   return value
 }
 
-/** Return the fail-closed policy used before the Owner creates settings. */
+/** Return the default daily automatic-review policy used before the Owner creates settings. */
 export function defaultMemoryApprovalPolicyV1(): MemoryApprovalPolicyV1 {
-  return { schemaVersion: 1, revision: 0, mode: 'manual' }
+  return {
+    schemaVersion: 1,
+    revision: 0,
+    mode: 'scheduled-auto',
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    localTime: '03:00',
+  }
 }
 
 /** Parse one untrusted persisted approval policy into its canonical form. */

@@ -7,9 +7,9 @@
 - DSH 拥有 Agent Runtime、Session、工具、权限、模型路由与 Web Host；本插件只使用 DSH 公开扩展点。
 - DSH 拥有 Workspace 的身份与生命周期；本插件只把 Memory Space 绑定到 DSH 提供的 Workspace，不创建平行的 Workspace 标识或路径规则。
 - Memory 拥有 Observation、Candidate、Confirmed Memory、revision、Archive、治理策略、召回与审计；Persona/RP 不是本仓库职责。
-- pending、rejected、import draft、跨 Owner/scope 或未获披露授权的内容不得进入召回。
+- 未过期 pending 只能作为醒目标注、预算受限的 Provisional Recall 在其 Source Space 内召回；rejected、expired、import draft、跨 Owner/scope 或未获披露授权的内容不得进入召回。
 - 模型可见 Recall Snapshot 与 AI review 必须能从 DSH Session 日志重建。
-- 默认审批模式是人工。任何定时自动审批都必须由 Owner 显式开启、可撤销、失败关闭并保留来源与策略 revision。
+- 默认审批模式是定时自动审批；Owner 可显式切换为人工审批。自动审批必须可撤销、失败关闭并保留来源与策略 revision。
 - CI/CD 不读取或修改真实用户 Memory、DSH Home、Session 或凭据；凌晨批处理运行在用户本机 DSH Runtime 内。
 
 ## 隐私与发布

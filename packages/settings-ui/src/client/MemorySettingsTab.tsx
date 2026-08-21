@@ -107,6 +107,7 @@ const CANDIDATE_STATUSES: readonly MemoryCandidate['status'][] = [
   'approved',
   'rejected',
   'superseded',
+  'expired',
 ]
 
 function memoryKindLabel(kind: MemoryKind, t: DshMemorySettingsTabProps['t']): string {
@@ -136,6 +137,7 @@ function candidateStatusLabel(
     approved: 'statusApproved',
     rejected: 'statusRejected',
     superseded: 'statusSuperseded',
+    expired: 'statusExpired',
   }
   return t(keys[status])
 }
@@ -787,6 +789,7 @@ function SessionMemorySettingsTab({
     {approvalSettings === undefined || approvalDraft === undefined ? null : <fieldset>
       <legend>{t('approvalSettings')}</legend>
       <small>{t('policyRevision')}: {approvalSettings.approvalPolicy.revision}</small>
+      <p role="note">{t('approvalDefaultWarning')}</p>
       <form
         aria-label={t('approvalForm')}
         onSubmit={(event) => {
@@ -990,6 +993,10 @@ function SessionMemorySettingsTab({
         : snapshot.management.candidates.map(candidate => <article key={candidate.id}>
             <p>{candidate.content}</p>
             <small>{memoryKindLabel(candidate.memoryKind, t)} · {visibilityLabel(candidate.visibility, t)} · {candidateStatusLabel(candidate.status, t)}</small>
+            {candidate.status === 'pending' ? <>
+              <small role="note">{t('provisionalWarning')}</small>
+              <small>{t('candidateExpiresAt')}: {candidate.expiresAt}</small>
+            </> : null}
             <div>
               <button type="button" disabled={busy} onClick={() => { showSource('candidate', candidate.id) }}>
                 {t('viewSource')}

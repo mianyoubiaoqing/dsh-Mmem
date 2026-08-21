@@ -2,7 +2,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import AgentRegistry, { Inbox, type Agent } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { agentEvents, Inbox, type Agent } from '@deepseek-ai/dsh-agent'
 import { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -21,6 +21,7 @@ const DENIED_TOOL_CASES = [
   ['memory_list', {}],
   ['memory_forget', { memoryId: 'memory-fixture' }],
   ['memory_replace', { memoryId: 'memory-fixture', content: 'Replacement fixture.' }],
+  ['memory_turn_expand', { candidateId: 'candidate-fixture' }],
 ] as const
 
 async function execute(
@@ -71,6 +72,52 @@ function value(result: ToolExecutionResult): unknown {
 }
 
 describe('MistyMoon memory tools', () => {
+  it('expands Turn Evidence only after its Candidate was recalled in the current Session', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-turn-expand-tool-'))
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(PrincipalLocalPlugin, { ownerId: 'owner-fixture' })
+    await ctx.plugin(MemoryPlugin, { path: join(root, 'memories.jsonl'), recallLimit: 4 })
+    const candidate = await ctx.mistymoonMemory.propose({
+      context: PERSONAL_COMPANION_ACCESS,
+      sourceMessageId: 'dsh-turn:expand-tool-source:1',
+      content: '本轮摘要（未审核）：讨论蓝绿部署与回滚检查。',
+      visibility: 'personal',
+      memoryKind: 'summary',
+      turnEvidence: {
+        schemaVersion: 1,
+        sessionId: 'expand-tool-source',
+        turn: 1,
+        userMessages: [{ messageId: 'expand-user', text: '讨论蓝绿部署。' }],
+        assistantMessage: { messageId: 'expand-assistant', text: '需要检查回滚路径。' },
+      },
+    })
+    const agent = toolAgent(ctx, 'expand-tool-reader')
+    const query = createUserMessage({
+      content: [{ type: 'text', text: '蓝绿部署的回滚检查是什么？' }],
+      source: { kind: 'user', rpcId: 'rpc-expand-query' } as ReturnType<typeof createUserMessage>['source'],
+    })
+    const decision = await agentEvents(ctx, agent).waterfall(
+      'agent/pre-step',
+      { messages: [query], turn: 1, step: 1, signal },
+      () => Promise.resolve({ kind: 'enter' as const, messages: [query] }),
+    )
+    if (decision.kind !== 'enter') throw new Error('expected provisional recall')
+
+    expect(value(await execute(ctx, 'memory_turn_expand', {
+      candidateId: candidate.id,
+      cursor: 0,
+    }, 'call-turn-expand', agent))).toMatchObject({
+      evidence: {
+        candidateId: candidate.id,
+        cursor: 0,
+        content: expect.stringContaining('需要检查回滚路径'),
+      },
+    })
+  })
+
   it('lists memory from the Active Space of the tool Agent DSH Workspace', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-space-tool-'))
     const ctx = new Context()

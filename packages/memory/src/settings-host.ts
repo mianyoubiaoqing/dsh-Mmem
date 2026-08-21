@@ -233,7 +233,8 @@ function memorySearch(value: unknown): MemorySearchInput | undefined {
       && value.recordStatus !== 'inactive' && value.recordStatus !== 'all')
     || (value.candidateStatus !== undefined && value.candidateStatus !== 'pending'
       && value.candidateStatus !== 'approved' && value.candidateStatus !== 'rejected'
-      && value.candidateStatus !== 'superseded' && value.candidateStatus !== 'all')
+      && value.candidateStatus !== 'superseded' && value.candidateStatus !== 'expired'
+      && value.candidateStatus !== 'all')
     || (value.limit !== undefined
       && (!Number.isSafeInteger(value.limit) || (value.limit as number) < 1 || (value.limit as number) > 500))) {
     return undefined

@@ -18,6 +18,59 @@ const access = {
 } as const
 
 describe('MemorySpaceArchiveRouterV1', () => {
+  it('recalls a provisional Candidate across Workspaces directly bound to the same Space', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-shared-space-provisional-'))
+    const ids = ['space-shared', 'binding-source-v1', 'binding-reader-v1']
+    const catalog = await openMemorySpaceCatalog({
+      path: join(root, 'catalog.json'),
+      createId: () => ids.shift() ?? 'unexpected-id',
+    })
+    const space = await catalog.createSpace({ ownerId: access.ownerId, name: 'Shared Space' })
+    const sourceHeader = { cwd: 'D:\\workspaces\\source' }
+    const readerHeader = { cwd: 'D:\\workspaces\\reader' }
+    await catalog.bindDshWorkspace({
+      ownerId: access.ownerId,
+      sessionHeader: sourceHeader,
+      spaceId: space.id,
+      access: 'read-write',
+      defaultWrite: true,
+    })
+    await catalog.bindDshWorkspace({
+      ownerId: access.ownerId,
+      sessionHeader: readerHeader,
+      spaceId: space.id,
+      access: 'read',
+      defaultWrite: false,
+    })
+    const router = await openMemorySpaceArchiveRouter({
+      catalog,
+      spacesRoot: join(root, 'spaces'),
+      now: () => new Date('2026-08-21T21:00:00.000Z'),
+    })
+    const source = await router.resolveSession({ ownerId: access.ownerId, sessionHeader: sourceHeader })
+    if (source.kind !== 'active') throw new Error('expected writable Source Space')
+    const candidate = await source.propose({
+      context: access,
+      sourceMessageId: 'shared-space-candidate',
+      content: 'Shared Space 可能使用中性的蓝绿部署流程。',
+      visibility: 'personal',
+      memoryKind: 'summary',
+    })
+    const reader = await router.resolveSession({
+      ownerId: access.ownerId,
+      sessionHeader: readerHeader,
+      requestedSpaceId: space.id,
+    })
+    if (reader.kind !== 'active') throw new Error('expected read-only shared Space')
+
+    const snapshot = await reader.retrieve({ context: access, query: '蓝绿部署' })
+    expect(snapshot.provisionalItems).toEqual([expect.objectContaining({
+      candidate,
+      sourceSpaceId: space.id,
+    })])
+    await router.dispose()
+  })
+
   it('persists and recalls memory only through the Active Space resolved from a DSH Session', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-mmem-space-router-'))
     const catalogPath = join(root, 'catalog.json')
@@ -218,6 +271,13 @@ describe('MemorySpaceArchiveRouterV1', () => {
       text: '请记住：The coding style summary is not shared.',
       memoryKind: 'summary',
     })
+    const borrowedCandidate = await source.propose({
+      context: access,
+      sourceMessageId: 'candidate-source-pending',
+      content: 'The coding style may use a provisional formatter.',
+      visibility: 'personal',
+      memoryKind: 'preference',
+    })
     const active = await router.resolveSession({ ownerId: access.ownerId, sessionHeader })
     if (active.kind !== 'active') throw new Error('expected Active Space')
     await active.observeExplicit({
@@ -253,6 +313,7 @@ describe('MemorySpaceArchiveRouterV1', () => {
     expect(snapshot.items.map(item => item.memory.content)).not.toContain(
       'The coding style summary is not shared.',
     )
+    expect(snapshot.provisionalItems?.map(item => item.candidate.id) ?? []).not.toContain(borrowedCandidate.id)
     expect((await active.retrieve({
       context: access,
       query: 'coding style',
