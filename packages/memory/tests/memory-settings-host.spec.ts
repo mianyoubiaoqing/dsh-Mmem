@@ -202,6 +202,34 @@ describe('dsh-Mmem Settings Host RPC', () => {
         },
       },
     })
+    await expect(registration.handler('summary/get', {
+      sessionId: String(session.id),
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        activeSpace: { spaceId: space.id },
+        turnSummaryPolicy: { schemaVersion: 1, revision: 0, mode: 'local-deterministic' },
+      },
+    })
+    await expect(registration.handler('summary/update', {
+      sessionId: String(session.id),
+      expectedRevision: 0,
+      mode: 'dsh-model',
+      provider: 'configured-provider',
+      model: 'configured-model',
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        activeSpace: { spaceId: space.id },
+        turnSummaryPolicy: {
+          schemaVersion: 1,
+          revision: 1,
+          mode: 'dsh-model',
+          provider: 'configured-provider',
+          model: 'configured-model',
+        },
+      },
+    })
     const readOnlySpace = await ctx.dshMmemSpaceCatalog.createSpace({
       ownerId: 'owner-fixture',
       name: 'Read Only Policy Receipt',
@@ -287,6 +315,15 @@ describe('dsh-Mmem Settings Host RPC', () => {
       requestedSpaceId: readOnlySpace.id,
       expectedRevision: 1,
       mode: 'manual',
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'bad-request', message: expect.stringContaining('read-write') },
+    })
+    await expect(registration.handler('summary/update', {
+      sessionId: String(session.id),
+      requestedSpaceId: readOnlySpace.id,
+      expectedRevision: 0,
+      mode: 'dsh-model',
     }, new AbortController().signal)).resolves.toMatchObject({
       ok: false,
       error: { code: 'bad-request', message: expect.stringContaining('read-write') },

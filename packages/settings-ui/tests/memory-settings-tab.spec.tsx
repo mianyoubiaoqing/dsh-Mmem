@@ -762,6 +762,91 @@ describe('dsh-Mmem Settings tab', () => {
     )
   })
 
+  it('explicitly opts the Active Memory Space into configured-model summary compression', async () => {
+    const activeSpace = {
+      spaceId: 'space-project-alpha',
+      access: 'read-write' as const,
+      bindingRevision: 'binding-summary-policy',
+    }
+    const call = vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'memory/search') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          management: { schemaVersion: 1, records: [], candidates: [], audit: [] },
+        },
+      }
+      if (endpoint === 'summary/get') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          turnSummaryPolicy: { schemaVersion: 1, revision: 0, mode: 'local-deterministic' as const },
+        },
+      }
+      if (endpoint === 'summary/update') return {
+        ok: true as const,
+        value: {
+          schemaVersion: 1,
+          activeSpace,
+          turnSummaryPolicy: {
+            schemaVersion: 1,
+            revision: 1,
+            mode: 'dsh-model' as const,
+            provider: 'configured-provider',
+            model: 'configured-model',
+          },
+        },
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab rpc={{ call }} useSessions={useSessions} t={key => `translated:${key}`} />)
+    })
+    const configure = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:configureTurnSummary'))
+    if (configure === undefined) throw new Error('expected turn-summary settings button')
+    await act(async () => {
+      configure.props.onClick()
+      await Promise.resolve()
+    })
+    expect(JSON.stringify(tree?.toJSON())).toContain('translated:turnSummaryPrivacyWarning')
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:turnSummaryMode' })
+        .props.onChange({ target: { value: 'dsh-model' } })
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:turnSummaryProvider' })
+        .props.onChange({ target: { value: 'configured-provider' } })
+      tree?.root.findByProps({ 'aria-label': 'translated:turnSummaryModel' })
+        .props.onChange({ target: { value: 'configured-model' } })
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:turnSummaryForm' })
+        .props.onSubmit({ preventDefault: vi.fn() })
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenCalledWith(
+      '/dsh-mmem-settings',
+      'summary/update',
+      {
+        sessionId: 'settings-session',
+        expectedRevision: 0,
+        mode: 'dsh-model',
+        provider: 'configured-provider',
+        model: 'configured-model',
+      },
+      undefined,
+    )
+  })
+
   it('creates a selective direct Space Share Grant with the observed policy revision', async () => {
     const activeSpace = {
       spaceId: 'space-target',

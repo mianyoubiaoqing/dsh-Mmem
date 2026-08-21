@@ -48,6 +48,10 @@ _Avoid_: Borrowed Recall、Confirmed Memory Recall、Workspace-local Recall
 产生 Candidate 的一个顶层 DSH 用户可见交互轮次；DSH Session 是其原始内容的权威来源。
 _Avoid_: Memory Space、完整 Session、隐藏推理
 
+**Turn Summary Policy**:
+Owner 对一个 Memory Space 内 Source Turn 摘要方式的版本化选择；默认本地确定性压缩，只有显式 opt-in 才调用 DSH 模型。
+_Avoid_: Workspace 模型设置、审批策略、Confirmed Memory
+
 **Turn Evidence Capsule**:
 与 Pending Candidate 同寿命、属于其 Source Space 的 Source Turn 临时证据副本；它只包含用户可见内容，过期或完成治理后清除 payload。
 _Avoid_: DSH Session、Confirmed Memory、永久 Conversation Archive

@@ -47,6 +47,7 @@ npm install @mistymoon/dsh-mmem@0.0.1-alpha.2
 3. 创建一个 Memory Space，或把已有 Space 绑定到当前 Workspace。
 4. 选择 Binding 是只读还是读写；需要接收新 Observation/Candidate 时，将一个读写 Space 设为该 Workspace 的 Default Write Space。
 5. 审批模式默认是 `scheduled-auto`，使用宿主机 IANA 时区的每日 `03:00`。如需逐条人工审批，Owner 必须在设置中手动选择并保存 `manual`。
+6. 轮次摘要默认使用不调用模型的本地快速压缩。Owner 可为当前 Memory Space 显式切换为 DSH 模型压缩，并可选指定已配置的 Provider/Model；留空则使用 DSH 默认路由。
 
 > **审批提示：自动审批默认开启。** 如需人工审批，请由 Owner 在 Memory Settings 中手动切换为“人工审批”并保存。
 
@@ -55,7 +56,7 @@ Workspace 身份只取自 live DSH `SessionHeader.cwd`。浏览器不能自行�
 ## 核心能力
 
 - **可追溯治理**：Confirmed Memory 保留 Owner、Memory Kind、可见性、来源消息 ID、时间与 append-only revision lineage；纠正通过新记录替代旧记录，不静默改写历史。
-- **临时记忆与候选审核**：每轮结束自动生成带 24 小时 TTL 的摘要 Candidate；未过期 Pending 仅在直接进入其 Memory Space 时作为醒目标注的不可靠记忆临时召回，并可按需分页展开该轮用户可见全文。Rejected、Expired 和 Import Draft 不参与召回。
+- **临时记忆与候选审核**：每轮结束自动生成带 24 小时 TTL 的摘要 Candidate；默认本地压缩，也可在当前 Memory Space 显式启用已配置 DSH 模型。未过期 Pending 仅在直接进入其 Memory Space 时作为醒目标注的不可靠记忆临时召回，并可按需分页展开该轮用户可见全文。Rejected、Expired 和 Import Draft 不参与召回。
 - **记忆浏览器**：侧栏底部的“记忆”按钮打开 Session-bound 浏览器，可在按记忆类型分组的目录视图和语义关系图谱之间切换，并支持搜索与图谱缩放。
 - **无需 embedding 的语义关系**：候选审批卡片可用滑块选择是否保存本地可解释规则建议的 `相关` / `矛盾` 关系；关系与正式记忆在同一 Archive 事务内确认，默认不影响召回。
 - **安全召回**：默认使用本地 BM25，并在检索前后执行 Owner、authority、scope、有效期、visibility 与 disclosure gate；模型看到的 Recall Snapshot 会写入 DSH Session 日志。
@@ -94,13 +95,14 @@ Borrowed Recall 始终保留 Source Space、授权关系和 policy revision，�
 
 - Memory Archive、设置、DSH Sessions、日志和凭据位于用户私有 DSH Home，不属于 npm 包，也不应进入 Git。
 - 未过期 Pending 只进入 Source Space 的独立 Provisional Recall 分栏，不通过 Selective/Federated/Borrowed Recall 传播；Rejected、Expired、Import Draft、跨 Owner/scope 或未获 disclosure 授权的内容不会进入召回。
+- DSH 模型压缩是每个 Memory Space 的显式 opt-in，会增加一次推理、延迟和可能的费用，并将 Source Turn 的用户可见内容交给选定 Provider。超时、非法输出或策略并发变更会回退本地摘要。
 - 默认 `local-dsh-host-rpc` authority 面向本机回环、单 Owner Web 部署；其他通道在提供可信 principal Adapter 前失败关闭。
 - 外部记忆或高级检索引擎只能作为可替换 Provider；Archive 仍是治理事实来源。
 
 ## 当前限制
 
 - 这是 alpha 版本，尚未声明兼容 DSH `rc.9`、后续 rc 或 stable；扩大范围前需要重新跑完整兼容矩阵。
-- 内置自动轮次摘要会创建不可靠 Candidate；更细粒度的事实抽取 seam 已存在，但默认不捆绑额外抽取 Provider，候选也可由受治理的 DSH 工具提出。
+- 自动轮次摘要仍是不可靠 Candidate。模型压缩失败时只回退本地摘要；它不等于细粒度事实抽取。额外抽取 Provider 仍未默认捆绑。
 - 默认检索是本地 BM25；PageIndex 和 graph Adapter 默认关闭，远程引擎、embedding 与 reranking 不属于当前基线。
 - 当前语义关系建议只使用本地确定性冲突与词法评估，不等同于向量相似度或模型级语义理解。Owner 的显式审批才使关系成为治理事实；`补充` 类型已进入存储和展示协议，但当前本地建议器不会自动判定它。
 - 写入首个 `relationship-confirmed` 事件后，旧版插件无法读取新增的 Archive 事件类型；升级前应保留可恢复备份，且不支持直接降级读取该 Archive。

@@ -132,6 +132,48 @@ describe('governed BM25 retrieval', () => {
     expect(second).not.toHaveProperty('nextCursor')
   })
 
+  it('persists model summary provenance beside temporary Turn Evidence', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mistymoon-turn-summary-provenance-'))
+    const path = join(root, 'memory.jsonl')
+    const archive = await openMemoryArchive({ path })
+    const candidate = await archive.propose({
+      context: PERSONAL_COMPANION_ACCESS,
+      sourceMessageId: 'dsh-turn:summary-provenance:1',
+      content: '本轮摘要（未审核，模型压缩）：中性摘要。',
+      visibility: 'personal',
+      memoryKind: 'summary',
+      extraction: {
+        schemaVersion: 1,
+        providerId: 'dsh-turn-summary',
+        providerVersion: '1',
+        receipt: {
+          kind: 'dsh-session',
+          sessionId: 'summary-model-session',
+          requestSeq: 2,
+          responseSeq: 5,
+        },
+      },
+      turnEvidence: {
+        schemaVersion: 1,
+        sessionId: 'summary-provenance',
+        turn: 1,
+        userMessages: [{ messageId: 'summary-user', text: '中性输入。' }],
+        assistantMessage: { messageId: 'summary-assistant', text: '中性输出。' },
+      },
+    })
+    await archive.dispose()
+
+    const reopened = await openMemoryArchive({ path })
+    expect(reopened.listCandidates({ context: PERSONAL_COMPANION_ACCESS })).toContainEqual(expect.objectContaining({
+      id: candidate.id,
+      turnEvidenceAvailable: true,
+      extraction: expect.objectContaining({
+        providerId: 'dsh-turn-summary',
+        receipt: expect.objectContaining({ sessionId: 'summary-model-session' }),
+      }),
+    }))
+  })
+
   it('returns an explained authoritative snapshot and drops unknown Provider IDs', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mistymoon-retrieval-'))
     const provider: RecallIndexProvider = {

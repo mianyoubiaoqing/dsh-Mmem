@@ -64,9 +64,12 @@ import {
   createDshAgentApprovalReviewSessionDriverV1,
   createDshMemoryApprovalReviewEvaluatorV1,
 } from './approval-review-dsh.js'
+import { createDshTurnSummaryCompressorV1 } from './turn-summary-dsh.js'
+import { proposeCompletedTurnSummaryV1 } from './turn-summary-runtime.js'
 import {
   CandidateExtractionRegistry,
   extractMemoryCandidates,
+  parseCandidateExtractionReceiptV1,
   type CandidateExtractionRequestV1,
 } from './candidate-extraction.js'
 import { AdvancedRetrievalRegistry } from './advanced-retrieval.js'
@@ -148,6 +151,9 @@ export * from './approval-scheduler.js'
 export * from './approval-review.js'
 export * from './approval-review-dsh.js'
 export * from './turn-evidence.js'
+export * from './turn-summary-policy.js'
+export * from './turn-summary-dsh.js'
+export * from './turn-summary-runtime.js'
 
 /** Cordis plugin name and durable user-message source id. */
 export const name = 'mistymoon-memory'
@@ -175,6 +181,14 @@ export interface Config {
   recallLimit?: number
   /** Optional private owner settings document read before each recall. */
   settingsPath?: string
+  /** Separate private per-Space automatic turn-summary policy document. */
+  turnSummarySettingsPath?: string
+  /** Maximum output tokens for one optional Source Turn compression response. */
+  turnSummaryModelMaxTokens?: number
+  /** Maximum user-visible characters sent to an optional summary model. */
+  turnSummaryModelMaxInputCharacters?: number
+  /** Maximum duration of one optional summary-model call. */
+  turnSummaryModelTimeoutMs?: number
   /** Optional payload-free scheduler state path; defaults adjacent to settingsPath. */
   approvalSchedulerPath?: string
   /** Local scheduler policy polling interval. */
@@ -215,6 +229,10 @@ export const Config: z<Config> = z.object({
   spaceSharingPath: z.string(),
   recallLimit: z.number().step(1).min(1).max(20).default(DEFAULT_RECALL_LIMIT),
   settingsPath: z.string(),
+  turnSummarySettingsPath: z.string(),
+  turnSummaryModelMaxTokens: z.number().step(1).min(64).max(4_096).default(384),
+  turnSummaryModelMaxInputCharacters: z.number().step(1).min(1).max(500_000).default(32_000),
+  turnSummaryModelTimeoutMs: z.number().step(1).min(100).max(60_000).default(15_000),
   approvalSchedulerPath: z.string(),
   approvalPollIntervalMs: z.number().step(1).min(1_000).max(3_600_000).default(60_000),
   approvalMaxCandidates: z.number().step(1).min(1).max(1_000).default(100),
@@ -678,6 +696,21 @@ class StorageBackedMemoryArchive implements CompanionMemoryArchive {
     const turnEvidence = input.turnEvidence === undefined
       ? undefined
       : parseMemoryTurnEvidenceCapsuleV1(input.turnEvidence)
+    const extraction = input.extraction === undefined
+      ? undefined
+      : (() => {
+          const providerId = input.extraction.providerId.trim()
+          const providerVersion = input.extraction.providerVersion.trim()
+          if (providerId === '' || providerVersion === '') {
+            throw new TypeError('candidate extraction provider identity must be non-empty')
+          }
+          return {
+            schemaVersion: 1 as const,
+            providerId,
+            providerVersion,
+            receipt: parseCandidateExtractionReceiptV1(input.extraction.receipt),
+          }
+        })()
     const candidate = await this.storage.transact(state => {
       const sourceKind = turnEvidence === undefined ? 'governance-operation' : 'dsh-message'
       const sourceKey = this.#sourceKey(context, sourceKind, input.sourceMessageId)
@@ -690,7 +723,8 @@ class StorageBackedMemoryArchive implements CompanionMemoryArchive {
           const candidate = used.candidateId === undefined ? undefined : state.candidateById.get(used.candidateId)
           const existingEvidence = candidate === undefined ? undefined : state.turnEvidenceByCandidateId.get(candidate.id)
           if (candidate !== undefined
-            && JSON.stringify(existingEvidence) === JSON.stringify(turnEvidence)) {
+            && JSON.stringify(existingEvidence) === JSON.stringify(turnEvidence)
+            && JSON.stringify(candidate.extraction) === JSON.stringify(extraction)) {
             return { events: [], result: candidate }
           }
         }
@@ -709,6 +743,7 @@ class StorageBackedMemoryArchive implements CompanionMemoryArchive {
         content, visibility: input.visibility, sourceMessageId: input.sourceMessageId, status: 'pending',
         expiresAt: candidateExpiry(timestamp),
         ...(turnEvidence === undefined ? {} : { turnEvidenceAvailable: true }),
+        ...(extraction === undefined ? {} : { extraction }),
       }
       const evidenceEvent: MemoryTurnEvidenceEvent | undefined = turnEvidence === undefined
         ? undefined
@@ -1729,18 +1764,6 @@ function finalTurnAssistantMessage(agent: Agent, turn: number): { messageId: str
   return undefined
 }
 
-function turnSummaryContent(userTexts: readonly string[], assistantText: string): string {
-  const normalizedUsers = userTexts.join(' ').replace(/\s+/gu, ' ').trim()
-  const normalizedAssistant = assistantText.replace(/\s+/gu, ' ').trim()
-  const prefix = '本轮摘要（未审核）：用户：'
-  const separator = '；助手：'
-  const budget = 800 - prefix.length - separator.length
-  const userBudget = Math.max(1, Math.floor(budget * 0.45))
-  const user = normalizedUsers.slice(0, userBudget)
-  const assistant = normalizedAssistant.slice(0, Math.max(1, budget - user.length))
-  return `${prefix}${user}${separator}${assistant}`
-}
-
 function ownerContext(
   principal: MemoryPrincipalV1 | undefined,
   channelDisclosure: MemoryAccessContextV1['channelDisclosure'],
@@ -2222,6 +2245,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const runtimeSettings = createMemoryRuntimeSettingsManager({
     fallbackRecallLimit: recallLimit,
     ...(config.settingsPath === undefined ? {} : { path: config.settingsPath }),
+    ...(config.turnSummarySettingsPath === undefined ? {} : { turnSummaryPath: config.turnSummarySettingsPath }),
+  })
+  const isolatedModelSessionDriver = createDshAgentApprovalReviewSessionDriverV1(ctx)
+  const turnSummaryCompressor = createDshTurnSummaryCompressorV1({
+    driver: isolatedModelSessionDriver,
+    maxTokens: config.turnSummaryModelMaxTokens ?? 384,
+    maxInputCharacters: config.turnSummaryModelMaxInputCharacters ?? 32_000,
+    timeoutMs: config.turnSummaryModelTimeoutMs ?? 15_000,
   })
   ctx.effect(
     () => ctx.provide('dshMmemRuntimeSettings', runtimeSettings),
@@ -2256,7 +2287,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     )
     if (config.approvalReviewEnabled !== false) {
       const evaluator = createDshMemoryApprovalReviewEvaluatorV1({
-        driver: createDshAgentApprovalReviewSessionDriverV1(ctx),
+        driver: isolatedModelSessionDriver,
         ...(config.approvalReviewProvider === undefined ? {} : { provider: config.approvalReviewProvider }),
         ...(config.approvalReviewModel === undefined ? {} : { model: config.approvalReviewModel }),
         maxTokens: config.approvalReviewMaxTokens ?? 512,
@@ -2459,19 +2490,22 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       && (!('kind' in summaryTarget) || summaryTarget.kind !== 'unavailable')
       && (!('access' in summaryTarget) || summaryTarget.access === 'read-write')) {
       try {
-        await summaryTarget.propose({
+        await proposeCompletedTurnSummaryV1({
+          target: summaryTarget,
+          settings: runtimeSettings,
+          compressor: turnSummaryCompressor,
+          spaceId: 'spaceId' in summaryTarget ? summaryTarget.spaceId : 'legacy-archive',
           context: summaryContext,
           sourceMessageId: `dsh-turn:${String(agent.session.id)}:${String(turn)}`,
-          content: turnSummaryContent(userMessages.map(message => message.text), assistantMessage.text),
-          visibility: 'personal',
-          memoryKind: 'summary',
-          turnEvidence: {
+          dshWorkspaceCwd: agent.session.header.cwd,
+          evidence: {
             schemaVersion: 1,
             sessionId: String(agent.session.id),
             turn,
             userMessages,
             assistantMessage,
           },
+          signal,
         })
       } catch {
         ctx.logger.warn('mistymoon-memory: automatic turn summary failed closed')

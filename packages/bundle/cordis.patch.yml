@@ -12,6 +12,10 @@
         spacesRoot: !!js dshHomePath('dsh-mmem', 'spaces')
         recallLimit: 8
         settingsPath: !!js dshHomePath('dsh-mmem', 'settings', 'settings.json')
+        turnSummarySettingsPath: !!js dshHomePath('dsh-mmem', 'settings', 'turn-summary.json')
+        turnSummaryModelMaxTokens: 384
+        turnSummaryModelMaxInputCharacters: 32000
+        turnSummaryModelTimeoutMs: 15000
         approvalPollIntervalMs: 60000
         approvalMaxCandidates: 100
         approvalMinimumConfidence: 0.9

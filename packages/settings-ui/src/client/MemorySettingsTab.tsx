@@ -12,6 +12,7 @@ import {
   type MemorySpaceSetupRpcSnapshotV1,
   type MemorySpaceSharingSettingsRpcSnapshotV1,
   type MemorySourceRpcSnapshotV1,
+  type MemoryTurnSummarySettingsRpcSnapshotV1,
 } from '@mistymoon/dsh-memory/settings-client'
 import type {
   MemoryCandidate,
@@ -65,6 +66,12 @@ interface ApprovalPolicyDraftV1 {
   mode: 'manual' | 'scheduled-auto'
   timeZone: string
   localTime: string
+}
+
+interface TurnSummaryPolicyDraftV1 {
+  mode: 'local-deterministic' | 'dsh-model'
+  provider: string
+  model: string
 }
 
 interface SharingPolicyDraftV1 {
@@ -199,6 +206,8 @@ function SessionMemorySettingsTab({
   const [batchResult, setBatchResult] = useState<MemoryBatchRpcSnapshotV1['batch']>()
   const [approvalSettings, setApprovalSettings] = useState<MemoryApprovalSettingsRpcSnapshotV1>()
   const [approvalDraft, setApprovalDraft] = useState<ApprovalPolicyDraftV1>()
+  const [turnSummarySettings, setTurnSummarySettings] = useState<MemoryTurnSummarySettingsRpcSnapshotV1>()
+  const [turnSummaryDraft, setTurnSummaryDraft] = useState<TurnSummaryPolicyDraftV1>()
   const [sharingSettings, setSharingSettings] = useState<MemorySpaceSharingSettingsRpcSnapshotV1>()
   const [sharingDraft, setSharingDraft] = useState<SharingPolicyDraftV1>()
   const [grantDraft, setGrantDraft] = useState<GrantDraftV1>()
@@ -212,6 +221,8 @@ function SessionMemorySettingsTab({
   useEffect(() => {
     setApprovalSettings(undefined)
     setApprovalDraft(undefined)
+    setTurnSummarySettings(undefined)
+    setTurnSummaryDraft(undefined)
     setSharingSettings(undefined)
     setSharingDraft(undefined)
     setGrantDraft(undefined)
@@ -455,6 +466,60 @@ function SessionMemorySettingsTab({
         setBusy(false)
         setApprovalSettings(result)
         setApprovalDraft(value => value === undefined ? value : { ...value, mode: result.approvalPolicy.mode })
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
+  const openTurnSummarySettings = (): void => {
+    if (busy) return
+    setBusy(true)
+    setFailed(false)
+    void client.getTurnSummaryPolicy().then(
+      result => {
+        setBusy(false)
+        setTurnSummarySettings(result)
+        setTurnSummaryDraft({
+          mode: result.turnSummaryPolicy.mode,
+          provider: result.turnSummaryPolicy.mode === 'dsh-model' ? result.turnSummaryPolicy.provider ?? '' : '',
+          model: result.turnSummaryPolicy.mode === 'dsh-model' ? result.turnSummaryPolicy.model ?? '' : '',
+        })
+      },
+      () => {
+        setBusy(false)
+        setFailed(true)
+      },
+    )
+  }
+
+  const saveTurnSummarySettings = (): void => {
+    if (busy || turnSummarySettings === undefined || turnSummaryDraft === undefined) return
+    setBusy(true)
+    setFailed(false)
+    const provider = turnSummaryDraft.provider.trim()
+    const model = turnSummaryDraft.model.trim()
+    const update = turnSummaryDraft.mode === 'local-deterministic'
+      ? {
+          expectedRevision: turnSummarySettings.turnSummaryPolicy.revision,
+          mode: 'local-deterministic' as const,
+        }
+      : {
+          expectedRevision: turnSummarySettings.turnSummaryPolicy.revision,
+          mode: 'dsh-model' as const,
+          ...(provider === '' ? {} : { provider }),
+          ...(model === '' ? {} : { model }),
+        }
+    void client.updateTurnSummaryPolicy(update).then(
+      result => {
+        setBusy(false)
+        setTurnSummarySettings(result)
+        setTurnSummaryDraft(value => value === undefined ? value : {
+          ...value,
+          mode: result.turnSummaryPolicy.mode,
+        })
       },
       () => {
         setBusy(false)
@@ -733,6 +798,9 @@ function SessionMemorySettingsTab({
     <button type="button" disabled={busy} onClick={openApprovalSettings}>
       {t('configureApproval')}
     </button>
+    <button type="button" disabled={busy} onClick={openTurnSummarySettings}>
+      {t('configureTurnSummary')}
+    </button>
     <button type="button" disabled={busy} onClick={openSharingSettings}>
       {t('configureSharing')}
     </button>
@@ -841,6 +909,59 @@ function SessionMemorySettingsTab({
             setApprovalDraft(undefined)
           }}
         >{t('cancel')}</button>
+      </form>
+    </fieldset>}
+    {turnSummarySettings === undefined || turnSummaryDraft === undefined ? null : <fieldset>
+      <legend>{t('turnSummarySettings')}</legend>
+      <small>{t('policyRevision')}: {turnSummarySettings.turnSummaryPolicy.revision}</small>
+      <p role="note">{t('turnSummaryPrivacyWarning')}</p>
+      <form
+        aria-label={t('turnSummaryForm')}
+        onSubmit={(event) => {
+          event.preventDefault()
+          saveTurnSummarySettings()
+        }}
+      >
+        <label>{t('turnSummaryMode')}<select
+          aria-label={t('turnSummaryMode')}
+          value={turnSummaryDraft.mode}
+          onChange={event => {
+            setTurnSummaryDraft(value => value === undefined ? value : {
+              ...value,
+              mode: event.target.value as TurnSummaryPolicyDraftV1['mode'],
+            })
+          }}
+        >
+          <option value="local-deterministic">{t('turnSummaryLocal')}</option>
+          <option value="dsh-model">{t('turnSummaryModelCompression')}</option>
+        </select></label>
+        {turnSummaryDraft.mode === 'dsh-model' ? <>
+          <label>{t('turnSummaryProvider')}<input
+            type="text"
+            aria-label={t('turnSummaryProvider')}
+            value={turnSummaryDraft.provider}
+            placeholder={t('turnSummaryRouteDefault')}
+            onChange={event => {
+              setTurnSummaryDraft(value => value === undefined ? value : { ...value, provider: event.target.value })
+            }}
+          /></label>
+          <label>{t('turnSummaryModel')}<input
+            type="text"
+            aria-label={t('turnSummaryModel')}
+            value={turnSummaryDraft.model}
+            placeholder={t('turnSummaryRouteDefault')}
+            onChange={event => {
+              setTurnSummaryDraft(value => value === undefined ? value : { ...value, model: event.target.value })
+            }}
+          /></label>
+        </> : null}
+        <button type="submit" disabled={busy || snapshot.activeSpace.access !== 'read-write'}>
+          {t('saveTurnSummary')}
+        </button>
+        <button type="button" disabled={busy} onClick={() => {
+          setTurnSummarySettings(undefined)
+          setTurnSummaryDraft(undefined)
+        }}>{t('cancel')}</button>
       </form>
     </fieldset>}
     {sharingSettings === undefined || sharingDraft === undefined || grantDraft === undefined ? null : <fieldset>
