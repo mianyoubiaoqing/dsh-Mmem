@@ -47,6 +47,19 @@ describe('dsh-Mmem Settings Host RPC', () => {
     const session = ctx.sessions.create(SessionId('space-onboarding-session'), { meta: { cwd } })
     if (registration === undefined) throw new Error('expected Settings RPC registration')
 
+    await expect(registration.handler('memory/search', {
+      sessionId: String(session.id),
+      recordStatus: 'all',
+      candidateStatus: 'pending',
+      limit: 200,
+    }, new AbortController().signal)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'active-space-unavailable',
+        message: 'The current DSH Workspace has no default Memory Space.',
+        details: { reason: 'default-write-space-unavailable' },
+      },
+    })
     await expect(registration.handler('spaces/get', {
       sessionId: String(session.id),
     }, new AbortController().signal)).resolves.toMatchObject({
@@ -455,11 +468,14 @@ describe('dsh-Mmem Settings Host RPC', () => {
       visibility: 'personal',
       memoryKind: 'summary',
     })
+    const existingMemory = active.list({ context: PERSONAL_COMPANION_ACCESS })[0]
+    if (existingMemory === undefined) throw new Error('expected approved Memory for relationship target')
     await expect(registration.handler('candidates/approve', {
       sessionId: String(session.id),
       candidateId: resolvedCandidate.id,
       requestId: 'settings-approve-resolution-1',
       resolution: { kind: 'keep-both' },
+      relationships: [{ targetMemoryId: existingMemory.id, relation: 'related-to' }],
     }, new AbortController().signal)).resolves.toEqual({
       ok: true,
       value: {
@@ -473,6 +489,20 @@ describe('dsh-Mmem Settings Host RPC', () => {
           sourceCandidateId: resolvedCandidate.id,
           status: 'confirmed',
         }),
+      },
+    })
+    await expect(registration.handler('relationships/list', {
+      sessionId: String(session.id),
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: { spaceId: space.id },
+        relationships: [{
+          targetMemoryId: existingMemory.id,
+          relation: 'related-to',
+          sourceCandidateId: resolvedCandidate.id,
+        }],
       },
     })
     const editResult = await registration.handler('memory/edit', {

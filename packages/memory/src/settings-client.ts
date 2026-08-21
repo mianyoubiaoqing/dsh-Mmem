@@ -2,6 +2,7 @@
 
 import { parseCandidateExtractionReceiptV1 } from './candidate-extraction.js'
 import type {
+  ConfirmedMemoryRelationshipV1,
   MemoryCandidate,
   MemoryBatchDecisionV1,
   MemoryCandidateDecision,
@@ -9,6 +10,7 @@ import type {
   MemoryManagementSnapshotV1,
   MemoryManagementQueryV1,
   MemoryRecord,
+  MemoryRelationshipSelectionV1,
   MemorySourceViewV1,
   MemoryVisibility,
 } from './contracts.js'
@@ -67,6 +69,13 @@ export interface MemoryCandidateQueueSnapshotV1 {
   schemaVersion: 1
   activeSpace: MemoryActiveSpaceReceiptV1
   candidates: MemoryCandidate[]
+}
+
+/** Confirmed semantic relationships visible through one exact Active Space. */
+export interface MemoryRelationshipsRpcSnapshotV1 {
+  schemaVersion: 1
+  activeSpace: MemoryActiveSpaceReceiptV1
+  relationships: ConfirmedMemoryRelationshipV1[]
 }
 
 /** Manual approval result retaining the Active Space receipt used for the write. */
@@ -152,6 +161,7 @@ export interface MemorySettingsClientOptionsV1 {
 /** Operations exposed to the standalone Memory settings surface. */
 export interface MemorySettingsClientV1 {
   listCandidates(signal?: AbortSignal): Promise<MemoryCandidateQueueSnapshotV1>
+  listRelationships(signal?: AbortSignal): Promise<MemoryRelationshipsRpcSnapshotV1>
   search(
     filters?: Omit<MemoryManagementQueryV1, 'context'>,
     signal?: AbortSignal,
@@ -166,6 +176,7 @@ export interface MemorySettingsClientV1 {
     candidateId: string,
     resolution?: MemoryCandidateDecision['resolution'],
     signal?: AbortSignal,
+    relationships?: readonly MemoryRelationshipSelectionV1[],
   ): Promise<MemoryCandidateApprovalSnapshotV1>
   rejectCandidate(candidateId: string, signal?: AbortSignal): Promise<MemoryCandidateRejectionSnapshotV1>
   editCandidate(input: {
@@ -424,6 +435,43 @@ function candidateQueue(value: unknown): MemoryCandidateQueueSnapshotV1 {
     throw new MemorySettingsClientError('invalid-response', 'Candidate queue contains invalid data', { cause: error })
   }
   return value as MemoryCandidateQueueSnapshotV1
+}
+
+function relationshipsSnapshot(value: unknown): MemoryRelationshipsRpcSnapshotV1 {
+  const input = exactObject(value, ['schemaVersion', 'activeSpace', 'relationships'], 'Memory relationships snapshot')
+  if (input.schemaVersion !== 1 || !Array.isArray(input.relationships)) {
+    throw new MemorySettingsClientError('invalid-response', 'Memory relationships snapshot has an invalid schema')
+  }
+  activeSpaceReceipt(input.activeSpace)
+  try {
+    for (const item of input.relationships) {
+      const relationship = exactObject(item, [
+        'schemaVersion', 'id', 'ownerId', 'scope', 'sourceMemoryId', 'targetMemoryId', 'relation',
+        'sourceCandidateId', 'sourceMessageId', 'createdAt',
+      ], 'Confirmed Memory relationship')
+      if (relationship.schemaVersion !== 1
+        || typeof relationship.id !== 'string' || relationship.id.trim() === ''
+        || typeof relationship.ownerId !== 'string' || relationship.ownerId.trim() === ''
+        || typeof relationship.sourceMemoryId !== 'string' || relationship.sourceMemoryId.trim() === ''
+        || typeof relationship.targetMemoryId !== 'string' || relationship.targetMemoryId.trim() === ''
+        || relationship.sourceMemoryId === relationship.targetMemoryId
+        || (relationship.relation !== 'related-to' && relationship.relation !== 'elaborates'
+          && relationship.relation !== 'contradicts')
+        || typeof relationship.sourceCandidateId !== 'string' || relationship.sourceCandidateId.trim() === ''
+        || typeof relationship.sourceMessageId !== 'string' || relationship.sourceMessageId.trim() === ''
+        || typeof relationship.createdAt !== 'string') {
+        throw new TypeError('Confirmed Memory relationship is invalid')
+      }
+      parseMemoryScopeV1(relationship.scope)
+      validateMemoryValidity({ recordedAt: relationship.createdAt })
+    }
+  } catch (error) {
+    if (error instanceof MemorySettingsClientError) throw error
+    throw new MemorySettingsClientError('invalid-response', 'Memory relationships snapshot contains invalid data', {
+      cause: error,
+    })
+  }
+  return value as MemoryRelationshipsRpcSnapshotV1
 }
 
 function managementSnapshot(value: unknown): MemoryManagementRpcSnapshotV1 {
@@ -839,6 +887,9 @@ export function createMemorySettingsClient(options: MemorySettingsClientOptionsV
     async listCandidates(signal) {
       return candidateQueue(await call('candidates/list', selection, signal))
     },
+    async listRelationships(signal) {
+      return relationshipsSnapshot(await call('relationships/list', selection, signal))
+    },
     async search(filters = {}, signal) {
       const payload = {
         ...selection,
@@ -864,12 +915,26 @@ export function createMemorySettingsClient(options: MemorySettingsClientOptionsV
         candidateId: nonEmpty(candidateId, 'candidateId'),
       }, signal))
     },
-    async approveCandidate(candidateId, resolution, signal) {
+    async approveCandidate(candidateId, resolution, signal, relationships) {
+      const selections = relationships?.map(relationship => {
+        if (relationship.relation !== 'related-to' && relationship.relation !== 'elaborates'
+          && relationship.relation !== 'contradicts') throw new TypeError('Memory relationship type is unsupported')
+        return {
+          targetMemoryId: nonEmpty(relationship.targetMemoryId, 'relationship targetMemoryId'),
+          relation: relationship.relation,
+        }
+      })
+      if (selections !== undefined && (selections.length > 20
+        || new Set(selections.map(selection => selection.targetMemoryId)).size !== selections.length)) {
+        throw new TypeError('Memory relationship selections must contain at most 20 unique targets')
+      }
+      const selectedRelationships = selections !== undefined && selections.length > 0 ? selections : undefined
       return approvalSnapshot(await call('candidates/approve', {
         ...selection,
         candidateId: nonEmpty(candidateId, 'candidateId'),
         requestId: nonEmpty(createRequestId(), 'requestId'),
         ...(resolution === undefined ? {} : { resolution }),
+        ...(selectedRelationships === undefined ? {} : { relationships: selectedRelationships }),
       }, signal))
     },
     async rejectCandidate(candidateId, signal) {

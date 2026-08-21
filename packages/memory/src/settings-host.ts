@@ -3,6 +3,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type {
+  MemoryRelationshipSelectionV1,
   MemoryBatchDecisionV1,
   MemoryManagementQueryV1,
 } from './contracts.js'
@@ -20,7 +21,10 @@ import type {
   MemorySpaceSharingSettingsRpcSnapshotV1,
   MemorySpaceSetupRpcSnapshotV1,
 } from './settings-client.js'
-import type { MemorySpaceGovernanceSessionV1 } from './space-governance.js'
+import {
+  MemorySpaceGovernanceUnavailableError,
+  type MemorySpaceGovernanceSessionV1,
+} from './space-governance.js'
 import { MemoryRuntimeSettingsError, type MemoryApprovalPolicyUpdateV1 } from './runtime-settings.js'
 import {
   MemorySpaceSharingError,
@@ -54,7 +58,8 @@ type MemorySettingsRpcResult =
   | {
       ok: false
       error: {
-        code: 'bad-request' | 'session-not-found' | 'settings-revision-conflict' | 'settings-not-configured'
+        code: 'active-space-unavailable' | 'bad-request' | 'session-not-found'
+          | 'settings-revision-conflict' | 'settings-not-configured'
         message: string
         details: Record<string, unknown>
       }
@@ -126,6 +131,7 @@ function candidateDecision(value: unknown): {
   candidateId: string
   requestId: string
   resolution?: MemoryBatchDecisionV1['resolution']
+  relationships?: readonly MemoryRelationshipSelectionV1[]
 } | undefined {
   const input = value as Record<string, unknown>
   const keys = [
@@ -133,6 +139,7 @@ function candidateDecision(value: unknown): {
     'requestId',
     ...(input?.requestedSpaceId === undefined ? [] : ['requestedSpaceId']),
     ...(input?.resolution === undefined ? [] : ['resolution']),
+    ...(input?.relationships === undefined ? [] : ['relationships']),
     'sessionId',
   ]
   if (!exactObject(value, keys)
@@ -153,11 +160,27 @@ function candidateDecision(value: unknown): {
       resolution = { kind: 'supersede', memoryId: value.resolution.memoryId }
     } else return undefined
   }
+  let relationships: MemoryRelationshipSelectionV1[] | undefined
+  if (value.relationships !== undefined) {
+    if (!Array.isArray(value.relationships) || value.relationships.length > 20) return undefined
+    relationships = []
+    const targets = new Set<string>()
+    for (const item of value.relationships) {
+      if (!exactObject(item, ['relation', 'targetMemoryId'])
+        || typeof item.targetMemoryId !== 'string' || item.targetMemoryId.trim() === ''
+        || (item.relation !== 'related-to' && item.relation !== 'elaborates'
+          && item.relation !== 'contradicts')
+        || targets.has(item.targetMemoryId)) return undefined
+      targets.add(item.targetMemoryId)
+      relationships.push({ targetMemoryId: item.targetMemoryId, relation: item.relation })
+    }
+  }
   return {
     sessionId: SessionId(value.sessionId),
     candidateId: value.candidateId,
     requestId: value.requestId,
     ...(resolution === undefined ? {} : { resolution }),
+    ...(relationships === undefined ? {} : { relationships }),
     ...(value.requestedSpaceId === undefined ? {} : { requestedSpaceId: value.requestedSpaceId }),
   }
 }
@@ -476,6 +499,7 @@ export function apply(ctx: Context): void {
         && endpoint !== 'memory/edit'
         && endpoint !== 'memory/merge'
         && endpoint !== 'memory/batch'
+        && endpoint !== 'relationships/list'
         && endpoint !== 'settings/get'
         && endpoint !== 'settings/approval'
         && endpoint !== 'sharing/get'
@@ -499,7 +523,8 @@ export function apply(ctx: Context): void {
       const sharingUpdate = endpoint === 'sharing/replace' ? memorySharingUpdate(payload) : undefined
       const spaceCreate = endpoint === 'spaces/create' ? memorySpaceCreate(payload) : undefined
       const spaceBind = endpoint === 'spaces/bind' ? memorySpaceBind(payload) : undefined
-      const selection = endpoint === 'candidates/list' || endpoint === 'settings/get' || endpoint === 'sharing/get'
+      const selection = endpoint === 'candidates/list' || endpoint === 'relationships/list'
+        || endpoint === 'settings/get' || endpoint === 'sharing/get'
         || endpoint === 'spaces/get'
         ? sessionSelection(payload)
         : decision ?? search ?? source ?? assessment ?? revision ?? batch ?? approvalUpdate ?? sharingUpdate
@@ -619,6 +644,16 @@ export function apply(ctx: Context): void {
           }
           return { ok: true, value }
         }
+        if (endpoint === 'relationships/list') {
+          return {
+            ok: true,
+            value: {
+              schemaVersion: 1,
+              activeSpace: activeSpaceReceipt(governance),
+              relationships: governance.listRelationships(),
+            },
+          }
+        }
         if (source !== undefined) {
           const value: MemorySourceRpcSnapshotV1 = {
             schemaVersion: 1,
@@ -671,6 +706,7 @@ export function apply(ctx: Context): void {
               candidateId: decision.candidateId,
               sourceMessageId: `dsh-mmem-settings:${decision.requestId}`,
               ...(decision.resolution === undefined ? {} : { resolution: decision.resolution }),
+              ...(decision.relationships === undefined ? {} : { relationships: decision.relationships }),
             }),
           }
           return { ok: true, value }
@@ -693,6 +729,21 @@ export function apply(ctx: Context): void {
         }
         return { ok: true, value }
       } catch (error) {
+        if (error instanceof MemorySpaceGovernanceUnavailableError) {
+          const message = error.reason === 'default-write-space-unavailable'
+            ? 'The current DSH Workspace has no default Memory Space.'
+            : error.reason === 'requested-space-unavailable'
+              ? 'The requested Memory Space is unavailable to the current DSH Workspace.'
+              : 'The selected DSH Session has no Workspace.'
+          return {
+            ok: false,
+            error: {
+              code: 'active-space-unavailable',
+              message,
+              details: { reason: error.reason },
+            },
+          }
+        }
         if (error instanceof MemoryRuntimeSettingsError) {
           return {
             ok: false,

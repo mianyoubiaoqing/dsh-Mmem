@@ -227,6 +227,43 @@ describe('dsh-Mmem Settings browser client', () => {
     )
   })
 
+  it('lists only validated confirmed Memory relationships for the current Session', async () => {
+    const call = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        activeSpace: {
+          spaceId: 'space-project-alpha',
+          access: 'read-write',
+          bindingRevision: 'binding-relations',
+        },
+        relationships: [{
+          schemaVersion: 1,
+          id: 'relationship-1',
+          ownerId: 'owner-fixture',
+          scope: { version: 1, kind: 'companion-reality' },
+          sourceMemoryId: 'memory-new',
+          targetMemoryId: 'memory-existing',
+          relation: 'elaborates',
+          sourceCandidateId: 'candidate-1',
+          sourceMessageId: 'message-approve-1',
+          createdAt: '2026-08-21T00:00:00.000Z',
+        }],
+      },
+    })
+    const client = createMemorySettingsClient({ rpc: { call }, sessionId: 'settings-session' })
+
+    await expect(client.listRelationships()).resolves.toMatchObject({
+      relationships: [{ id: 'relationship-1', relation: 'elaborates' }],
+    })
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      '/dsh-mmem-settings',
+      'relationships/list',
+      { sessionId: 'settings-session' },
+      undefined,
+    )
+  })
+
   it('approves one Candidate with a client-generated idempotency request and explicit resolution', async () => {
     const call = vi.fn().mockResolvedValue({
       ok: true,
@@ -259,8 +296,14 @@ describe('dsh-Mmem Settings browser client', () => {
       sessionId: 'settings-session',
       createRequestId: () => 'request-approve-1',
     })
+    const signal = new AbortController().signal
 
-    await expect(client.approveCandidate('candidate-1', { kind: 'keep-both' })).resolves.toEqual(
+    await expect(client.approveCandidate(
+      'candidate-1',
+      { kind: 'keep-both' },
+      signal,
+      [{ targetMemoryId: 'memory-existing', relation: 'elaborates' }],
+    )).resolves.toEqual(
       expect.objectContaining({ memory: expect.objectContaining({ id: 'memory-1' }) }),
     )
     expect(call).toHaveBeenCalledExactlyOnceWith(
@@ -271,8 +314,9 @@ describe('dsh-Mmem Settings browser client', () => {
         candidateId: 'candidate-1',
         requestId: 'request-approve-1',
         resolution: { kind: 'keep-both' },
+        relationships: [{ targetMemoryId: 'memory-existing', relation: 'elaborates' }],
       },
-      undefined,
+      signal,
     )
   })
 

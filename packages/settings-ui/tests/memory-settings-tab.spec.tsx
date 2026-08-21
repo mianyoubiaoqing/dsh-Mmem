@@ -37,7 +37,13 @@ describe('dsh-Mmem Settings tab', () => {
     let bound = false
     const call = vi.fn(async (_channel: string, endpoint: string) => {
       if (endpoint === 'memory/search') {
-        if (!bound) return { ok: false as const, error: { code: 'bad-request', message: 'no Active Space' } }
+        if (!bound) return {
+          ok: false as const,
+          error: {
+            code: 'active-space-unavailable',
+            message: 'The current DSH Workspace has no default Memory Space.',
+          },
+        }
         return {
           ok: true as const,
           value: {
@@ -87,14 +93,13 @@ describe('dsh-Mmem Settings tab', () => {
     let tree: ReturnType<typeof create> | undefined
     await act(async () => {
       tree = create(<DshMemorySettingsTab rpc={{ call }} useSessions={useSessions} t={key => `translated:${key}`} />)
-    })
-    const configure = tree?.root.findAllByType('button')
-      .find(button => button.children.includes('translated:configureSpaces'))
-    if (configure === undefined) throw new Error('expected Memory Space setup button')
-    await act(async () => {
-      configure.props.onClick()
       await Promise.resolve()
     })
+    expect(tree?.root.findAll(node => node.props.role === 'alert')).toHaveLength(0)
+    expect(tree?.root.findByProps({ 'aria-label': 'translated:createSpaceForm' })).toBeDefined()
+    expect(tree?.root.findAllByType('label').some(
+      label => label.children.includes('translated:spaceName'),
+    )).toBe(true)
     await act(async () => {
       tree?.root.findByProps({ 'aria-label': 'translated:spaceName' })
         .props.onChange({ target: { value: 'New Project' } })
@@ -122,6 +127,42 @@ describe('dsh-Mmem Settings tab', () => {
       },
       undefined,
     )
+  })
+
+  it('lets the Owner retry a failed Session-bound Memory read', async () => {
+    const call = vi.fn()
+      .mockResolvedValueOnce({ ok: false, error: { code: 'transport-failed', message: 'temporary failure' } })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: {
+          schemaVersion: 1,
+          activeSpace: {
+            spaceId: 'space-recovered',
+            access: 'read-write',
+            bindingRevision: 'binding-recovered',
+          },
+          management: { schemaVersion: 1, records: [], candidates: [], audit: [] },
+        },
+      })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab rpc={{ call }} useSessions={useSessions} t={key => `translated:${key}`} />)
+      await Promise.resolve()
+    })
+    const retry = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:retry'))
+    if (retry === undefined) throw new Error('expected retry button')
+
+    await act(async () => {
+      retry.props.onClick()
+      await Promise.resolve()
+    })
+
+    expect(JSON.stringify(tree?.toJSON())).toContain('space-recovered')
   })
 
   it('binds Memory search to the current DSH Session and renders the resolved Active Space', async () => {
@@ -272,6 +313,9 @@ describe('dsh-Mmem Settings tab', () => {
     const rendered = JSON.stringify(tree?.toJSON())
     expect(rendered).toContain('translated:records')
     expect(rendered).toContain('经治理确认的中性偏好。')
+    expect(tree?.root.findAllByType('small').some(small =>
+      small.children.join('') === 'translated:kindPreference · translated:visibilityPersonal · translated:statusConfirmed',
+    )).toBe(true)
   })
 
   it('shows payload-free Candidate provenance in a read-only Binding', async () => {
@@ -875,7 +919,12 @@ describe('dsh-Mmem Settings tab', () => {
             schemaVersion: 1,
             candidateId: 'candidate-1',
             evaluatedAt: '2026-08-21T00:01:00.000Z',
-            relationships: [],
+            relationships: [{
+              memoryId: 'memory-related',
+              relation: 'related' as const,
+              score: 0.64,
+              reason: 'lexical-overlap' as const,
+            }],
           },
         },
       }
@@ -917,6 +966,12 @@ describe('dsh-Mmem Settings tab', () => {
     })
 
     expect(JSON.stringify(tree?.toJSON())).toContain('需要人工审批的中性候选。')
+    const relationshipSwitch = tree?.root.findByProps({
+      'aria-label': 'translated:analyzeRelationships',
+    })
+    await act(async () => {
+      relationshipSwitch?.props.onChange({ target: { checked: true } })
+    })
     const approve = tree?.root.findAllByType('button')
       .find(button => button.children.includes('translated:approve'))
     if (approve === undefined) throw new Error('expected the Candidate approve button')
@@ -931,6 +986,14 @@ describe('dsh-Mmem Settings tab', () => {
       'candidates/approve',
       'memory/search',
     ])
+    expect(call).toHaveBeenCalledWith(
+      '/dsh-mmem-settings',
+      'candidates/approve',
+      expect.objectContaining({
+        relationships: [{ targetMemoryId: 'memory-related', relation: 'related-to' }],
+      }),
+      undefined,
+    )
   })
 
   it('requires an explicit Owner resolution before approving a conflicting Candidate', async () => {
@@ -1017,6 +1080,12 @@ describe('dsh-Mmem Settings tab', () => {
         t={key => `translated:${key}`}
       />)
     })
+    const relationshipSwitch = tree?.root.findByProps({
+      'aria-label': 'translated:analyzeRelationships',
+    })
+    await act(async () => {
+      relationshipSwitch?.props.onChange({ target: { checked: true } })
+    })
     const approve = tree?.root.findAllByType('button')
       .find(button => button.children.includes('translated:approve'))
     if (approve === undefined) throw new Error('expected the Candidate approve button')
@@ -1026,11 +1095,11 @@ describe('dsh-Mmem Settings tab', () => {
     })
     expect(JSON.stringify(tree?.toJSON())).toContain('translated:keepBoth')
 
-    const keepBoth = tree?.root.findAllByType('button')
-      .find(button => button.children.includes('translated:keepBoth'))
-    if (keepBoth === undefined) throw new Error('expected the keep-both resolution button')
+    const supersede = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:supersede'))
+    if (supersede === undefined) throw new Error('expected the supersede resolution button')
     await act(async () => {
-      keepBoth.props.onClick()
+      supersede.props.onClick()
       await Promise.resolve()
       await Promise.resolve()
     })
@@ -1040,9 +1109,12 @@ describe('dsh-Mmem Settings tab', () => {
       expect.objectContaining({
         sessionId: 'settings-session',
         candidateId: candidate.id,
-        resolution: { kind: 'keep-both' },
+        resolution: { kind: 'supersede', memoryId: 'memory-existing' },
       }),
       undefined,
     )
+    const approvalPayload = (call.mock.calls as unknown as Array<[string, string, unknown]>)
+      .find(([, endpoint]) => endpoint === 'candidates/approve')?.[2]
+    expect(approvalPayload).not.toHaveProperty('relationships')
   })
 })

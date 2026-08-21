@@ -11,6 +11,7 @@ import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool, type ToolExecution, type ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
 import type {
   CompanionMemoryArchive,
+  ConfirmedMemoryRelationshipV1,
   ConfirmedMemoryImport,
   ConfirmedMemoryImportResult,
   ExtractedMemoryCandidateBatch,
@@ -37,6 +38,7 @@ import type {
   MemoryRecall,
   MemoryRecallSnapshotV1,
   MemoryRecord,
+  MemoryRelationshipListV1,
   MemoryReplace,
   MemoryRetrievalRequestV1,
   MemorySourceViewRequestV1,
@@ -95,6 +97,7 @@ import {
   type MemoryCandidateResolutionEvent,
   type MemoryForgottenEvent,
   type MemoryLifecycleEvent,
+  type MemoryRelationshipConfirmedEvent,
   type SourceUse,
 } from './storage/index.js'
 import {
@@ -966,15 +969,51 @@ class StorageBackedMemoryArchive implements CompanionMemoryArchive {
     return this.#assessment(state, candidate, context, this.now().toISOString())
   }
 
+  listRelationships(input: MemoryRelationshipListV1): ConfirmedMemoryRelationshipV1[] {
+    const context = this.#context(input.context)
+    const state = this.storage.snapshot()
+    if (state === undefined) return []
+    return state.relationships
+      .filter(relationship => relationship.ownerId === context.ownerId
+        && memoryScopeEquals(relationship.scope, context.scope))
+      .filter(relationship => {
+        const source = state.byId.get(relationship.sourceMemoryId)
+        const target = state.byId.get(relationship.targetMemoryId)
+        return source !== undefined && target !== undefined
+          && source.status === 'confirmed' && target.status === 'confirmed'
+          && this.#sameDomain(state, source, context) && this.#sameDomain(state, target, context)
+          && canDiscloseMemory(source.visibility, context) && canDiscloseMemory(target.visibility, context)
+      })
+      .map(relationship => ({ ...relationship, scope: { ...relationship.scope } }))
+      .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id))
+  }
+
   async approveCandidate(input: MemoryCandidateDecision): Promise<MemoryRecord> {
     const context = this.#context(input.context)
+    const relationshipSelections = (input.relationships ?? []).map(selection => {
+      const targetMemoryId = selection.targetMemoryId.trim()
+      if (targetMemoryId === '') throw new TypeError('Memory relationship target must be non-empty')
+      if (selection.relation !== 'related-to' && selection.relation !== 'elaborates'
+        && selection.relation !== 'contradicts') throw new TypeError('Memory relationship type is unsupported')
+      return { targetMemoryId, relation: selection.relation }
+    })
+    if (relationshipSelections.length > 20
+      || new Set(relationshipSelections.map(selection => selection.targetMemoryId)).size !== relationshipSelections.length) {
+      throw new TypeError('Memory relationship selections must contain at most 20 unique targets')
+    }
+    const relationshipKeys = relationshipSelections.map(
+      selection => `${selection.targetMemoryId}:${selection.relation}`,
+    ).toSorted()
     const memory = await this.storage.transact(state => {
       const sourceKey = this.#sourceKey(context, 'governance-operation', input.sourceMessageId)
       const used = state.sources.get(sourceKey)
       if (used !== undefined) {
         const targetMemoryId = input.resolution?.kind === 'supersede' ? input.resolution.memoryId : undefined
         if (used.kind === 'approve' && used.candidateId === input.candidateId
-          && used.targetMemoryId === targetMemoryId) return { events: [], result: existingMemory(state, used) }
+          && used.targetMemoryId === targetMemoryId
+          && JSON.stringify((used.relationships ?? []).toSorted()) === JSON.stringify(relationshipKeys)) {
+          return { events: [], result: existingMemory(state, used) }
+        }
         return conflict(input.sourceMessageId)
       }
       const candidate = this.#candidate(state, input.candidateId, context)
@@ -996,6 +1035,14 @@ class StorageBackedMemoryArchive implements CompanionMemoryArchive {
           throw new MemoryArchiveError('memory supersession target is not an assessed conflict', 'MEMORY_CONFLICT_TARGET_INVALID')
         }
       }
+      const assessedMemoryIds = new Set(assessment.relationships.map(relationship => relationship.memoryId))
+      if (relationshipSelections.some(selection => !assessedMemoryIds.has(selection.targetMemoryId)
+        || selection.targetMemoryId === superseded?.id)) {
+        throw new MemoryArchiveError(
+          'Memory relationship target is not an active assessed relationship',
+          'MEMORY_RELATIONSHIP_TARGET_INVALID',
+        )
+      }
       const observation = this.#observation(context, 'governance-operation', input.sourceMessageId, timestamp)
       const approved: MemoryRecord = {
         schemaVersion: 2, id: this.createId(), ownerId: candidate.ownerId, scope: candidate.scope,
@@ -1014,9 +1061,23 @@ class StorageBackedMemoryArchive implements CompanionMemoryArchive {
         candidateId: candidate.id, decision: 'approved', sourceMessageId: input.sourceMessageId,
         memoryId: approved.id,
       }
+      const relationships: MemoryRelationshipConfirmedEvent[] = relationshipSelections.map(selection => ({
+        schemaVersion: 2,
+        event: 'relationship-confirmed',
+        id: this.createId(),
+        createdAt: timestamp,
+        ownerId: context.ownerId,
+        scope: context.scope,
+        observationId: observation.id,
+        sourceMemoryId: approved.id,
+        targetMemoryId: selection.targetMemoryId,
+        relation: selection.relation,
+        sourceCandidateId: candidate.id,
+        sourceMessageId: input.sourceMessageId,
+      }))
       candidate.status = 'approved'
       if (superseded !== undefined) superseded.status = 'superseded'
-      return { events: [observation, approved, resolution], result: approved }
+      return { events: [observation, approved, ...relationships, resolution], result: approved }
     })
     for (const candidate of this.#candidateReferences.get(input.candidateId) ?? []) candidate.status = 'approved'
     return memory

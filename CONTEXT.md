@@ -20,6 +20,20 @@ _Avoid_: tag、embedding class、Memory Scope
 一条 Observation、Candidate 或 Confirmed Memory 唯一归属的 Memory Space；跨空间召回不会改变该归属。
 _Avoid_: 当前 DSH Workspace、召回目标、复制空间
 
+## Memory relationships
+
+**Relationship Candidate**:
+连接两条 Confirmed Memory 的待审核语义关系建议；它不是治理事实，也不得影响召回。
+_Avoid_: Confirmed Memory Relationship、相似度命中、图谱边
+
+**Confirmed Memory Relationship**:
+Owner 明确批准的两条 Confirmed Memory 之间的受治理语义关系；它拥有来源与修订历史，并且只有两个端点都可披露时才可见。
+_Avoid_: Relationship Candidate、检索相似度、Memory Space sharing relation
+
+**Summary Memory**:
+由多条来源记忆归纳出的新 Confirmed Memory，并保留完整来源记忆关系；它不是连接既有记忆的语义关系。
+_Avoid_: Confirmed Memory Relationship、合并显示、图谱分组
+
 ## Spaces and DSH workspaces
 
 **Memory Space**:

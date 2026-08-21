@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   createMemorySettingsClient,
+  MemorySettingsClientError,
   type MemoryAssessmentRpcSnapshotV1,
   type MemoryApprovalSettingsRpcSnapshotV1,
   type MemoryBatchRpcSnapshotV1,
@@ -12,7 +13,11 @@ import {
   type MemorySpaceSharingSettingsRpcSnapshotV1,
   type MemorySourceRpcSnapshotV1,
 } from '@mistymoon/dsh-memory/settings-client'
-import type { MemoryCandidate, MemoryVisibility } from '@mistymoon/dsh-memory/contracts'
+import type {
+  MemoryCandidate,
+  MemoryRelationshipSelectionV1,
+  MemoryVisibility,
+} from '@mistymoon/dsh-memory/contracts'
 import type { MemoryKind } from '@mistymoon/dsh-memory/domain'
 import type {
   InterSpaceModeV1,
@@ -104,6 +109,68 @@ const CANDIDATE_STATUSES: readonly MemoryCandidate['status'][] = [
   'superseded',
 ]
 
+function memoryKindLabel(kind: MemoryKind, t: DshMemorySettingsTabProps['t']): string {
+  const keys: Record<MemoryKind, MemorySettingsLocaleKey> = {
+    preference: 'kindPreference',
+    biographical: 'kindBiographical',
+    boundary: 'kindBoundary',
+    commitment: 'kindCommitment',
+    relationship: 'kindRelationship',
+    episode: 'kindEpisode',
+    state: 'kindState',
+    summary: 'kindSummary',
+  }
+  return t(keys[kind])
+}
+
+function visibilityLabel(visibility: MemoryVisibility, t: DshMemorySettingsTabProps['t']): string {
+  return t(visibility === 'confidential' ? 'visibilityConfidential' : 'visibilityPersonal')
+}
+
+function candidateStatusLabel(
+  status: MemoryCandidate['status'],
+  t: DshMemorySettingsTabProps['t'],
+): string {
+  const keys: Record<MemoryCandidate['status'], MemorySettingsLocaleKey> = {
+    pending: 'statusPending',
+    approved: 'statusApproved',
+    rejected: 'statusRejected',
+    superseded: 'statusSuperseded',
+  }
+  return t(keys[status])
+}
+
+function recordStatusLabel(
+  status: 'confirmed' | 'forgotten' | 'superseded',
+  t: DshMemorySettingsTabProps['t'],
+): string {
+  if (status === 'confirmed') return t('statusConfirmed')
+  if (status === 'forgotten') return t('statusForgotten')
+  return t('statusSuperseded')
+}
+
+function accessLabel(access: WorkspaceBindingDraftV1['access'], t: DshMemorySettingsTabProps['t']): string {
+  return t(access === 'read-write' ? 'accessReadWrite' : 'accessRead')
+}
+
+function assessmentLabel(
+  relation: 'duplicate' | 'related' | 'conflict',
+  t: DshMemorySettingsTabProps['t'],
+): string {
+  if (relation === 'duplicate') return t('assessmentDuplicate')
+  if (relation === 'conflict') return t('assessmentConflict')
+  return t('assessmentRelated')
+}
+
+function assessmentReasonLabel(
+  reason: 'exact-normalized-match' | 'same-kind-near-match' | 'lexical-overlap',
+  t: DshMemorySettingsTabProps['t'],
+): string {
+  if (reason === 'exact-normalized-match') return t('reasonExactMatch')
+  if (reason === 'same-kind-near-match') return t('reasonNearMatch')
+  return t('reasonLexicalOverlap')
+}
+
 const DEFAULT_FILTERS: MemoryFilterStateV1 = {
   query: '',
   memoryKind: '',
@@ -125,6 +192,7 @@ function SessionMemorySettingsTab({
   const [sourceView, setSourceView] = useState<MemorySourceRpcSnapshotV1['source']>()
   const [editDraft, setEditDraft] = useState<CandidateEditDraftV1>()
   const [mergeSelection, setMergeSelection] = useState<string[]>([])
+  const [relationshipAnalysis, setRelationshipAnalysis] = useState<string[]>([])
   const [mergeDraft, setMergeDraft] = useState<CandidateMergeDraftV1>()
   const [batchResult, setBatchResult] = useState<MemoryBatchRpcSnapshotV1['batch']>()
   const [approvalSettings, setApprovalSettings] = useState<MemoryApprovalSettingsRpcSnapshotV1>()
@@ -168,10 +236,41 @@ function SessionMemorySettingsTab({
       limit: 200,
     }, controller.signal).then(
       value => { setSnapshot(value) },
-      () => { if (!controller.signal.aborted) setFailed(true) },
+      error => {
+        if (controller.signal.aborted) return
+        if (error instanceof MemorySettingsClientError && error.code === 'active-space-unavailable') {
+          setBusy(true)
+          void client.inspectSpaces(controller.signal).then(
+            result => {
+              setBusy(false)
+              setSpaceSetup(result)
+              setBindingDraft(selectUnboundSpace(result))
+            },
+            () => {
+              if (!controller.signal.aborted) {
+                setBusy(false)
+                setFailed(true)
+              }
+            },
+          )
+          return
+        }
+        setFailed(true)
+      },
     )
     return () => { controller.abort() }
   }, [appliedFilters, client, refresh])
+
+  const semanticSelections = (
+    assessment: MemoryAssessmentRpcSnapshotV1['assessment'],
+    excludedTargetId?: string,
+  ): MemoryRelationshipSelectionV1[] => assessment.relationships.flatMap(relationship => {
+    if (relationship.relation === 'duplicate' || relationship.memoryId === excludedTargetId) return []
+    return [{
+      targetMemoryId: relationship.memoryId,
+      relation: relationship.relation === 'conflict' ? 'contradicts' : 'related-to',
+    }]
+  })
 
   const approveCandidate = (candidateId: string): void => {
     if (busy) return
@@ -186,7 +285,12 @@ function SessionMemorySettingsTab({
         setBusy(false)
         return
       }
-      await client.approveCandidate(candidateId)
+      await client.approveCandidate(
+        candidateId,
+        undefined,
+        undefined,
+        relationshipAnalysis.includes(candidateId) ? semanticSelections(result.assessment) : undefined,
+      )
       setBusy(false)
       setRefresh(value => value + 1)
     }).catch(() => {
@@ -201,7 +305,14 @@ function SessionMemorySettingsTab({
     if (busy || conflict === undefined) return
     setBusy(true)
     setFailed(false)
-    void client.approveCandidate(conflict.candidateId, resolution).then(
+    void client.approveCandidate(
+      conflict.candidateId,
+      resolution,
+      undefined,
+      relationshipAnalysis.includes(conflict.candidateId)
+        ? semanticSelections(conflict, resolution.kind === 'supersede' ? resolution.memoryId : undefined)
+        : undefined,
+    ).then(
       () => {
         setBusy(false)
         setConflict(undefined)
@@ -512,18 +623,26 @@ function SessionMemorySettingsTab({
     )
   }
 
+  const retryLoad = (): void => {
+    if (busy) return
+    setFailed(false)
+    setRefresh(value => value + 1)
+  }
+
   const spaceSetupPanel = spaceSetup === undefined ? null : <fieldset>
     <legend>{t('spaceSetup')}</legend>
     <form aria-label={t('createSpaceForm')} onSubmit={(event) => {
       event.preventDefault()
       createSpace()
     }}>
-      <input
-        type="text"
-        aria-label={t('spaceName')}
-        value={spaceName}
-        onChange={event => { setSpaceName(event.target.value) }}
-      />
+      <label>{t('spaceName')}
+        <input
+          type="text"
+          aria-label={t('spaceName')}
+          value={spaceName}
+          onChange={event => { setSpaceName(event.target.value) }}
+        />
+      </label>
       <button type="submit" disabled={busy || spaceName.trim() === ''}>{t('createSpace')}</button>
     </form>
     {spaceSetup.spaces.length === 0 ? <p>{t('noSpaces')}</p> : <ul>
@@ -536,35 +655,40 @@ function SessionMemorySettingsTab({
       event.preventDefault()
       bindCurrentDshWorkspace()
     }}>
-      <select
-        aria-label={t('spaceToBind')}
-        value={bindingDraft.spaceId}
-        onChange={event => {
-          setBindingDraft(value => value === undefined ? value : { ...value, spaceId: event.target.value })
-        }}
-      >
-        {spaceSetup.spaces
-          .filter(space => !spaceSetup.bindings.some(binding => binding.spaceId === space.id))
-          .map(space => <option key={space.id} value={space.id}>{space.name}</option>)}
-      </select>
-      <select
-        aria-label={t('bindingAccess')}
-        value={bindingDraft.access}
-        onChange={event => {
-          const access = event.target.value as WorkspaceBindingDraftV1['access']
-          setBindingDraft(value => value === undefined ? value : {
-            ...value,
-            access,
-            defaultWrite: access === 'read-write' && value.defaultWrite,
-          })
-        }}
-      >
-        <option value="read">read</option>
-        <option value="read-write">read-write</option>
-      </select>
-      <label>
+      <label>{t('spaceToBind')}
+        <select
+          aria-label={t('spaceToBind')}
+          value={bindingDraft.spaceId}
+          onChange={event => {
+            setBindingDraft(value => value === undefined ? value : { ...value, spaceId: event.target.value })
+          }}
+        >
+          {spaceSetup.spaces
+            .filter(space => !spaceSetup.bindings.some(binding => binding.spaceId === space.id))
+            .map(space => <option key={space.id} value={space.id}>{space.name}</option>)}
+        </select>
+      </label>
+      <label>{t('bindingAccess')}
+        <select
+          aria-label={t('bindingAccess')}
+          value={bindingDraft.access}
+          onChange={event => {
+            const access = event.target.value as WorkspaceBindingDraftV1['access']
+            setBindingDraft(value => value === undefined ? value : {
+              ...value,
+              access,
+              defaultWrite: access === 'read-write' && value.defaultWrite,
+            })
+          }}
+        >
+          <option value="read">{t('accessRead')}</option>
+          <option value="read-write">{t('accessReadWrite')}</option>
+        </select>
+      </label>
+      <label className="dsh-mmem-switch">
         <input
           type="checkbox"
+          role="switch"
           aria-label={t('defaultWriteSpace')}
           checked={bindingDraft.defaultWrite}
           disabled={bindingDraft.access !== 'read-write'
@@ -582,16 +706,28 @@ function SessionMemorySettingsTab({
     }}>{t('cancel')}</button>
   </fieldset>
 
+  if (snapshot === undefined && spaceSetup !== undefined) return <section className="dsh-mmem-settings">
+    <header><h2>{t('firstUseTitle')}</h2><p>{t('firstUseDescription')}</p></header>
+    {spaceSetupPanel}
+  </section>
   if (failed && snapshot === undefined) return <section className="dsh-mmem-settings">
     <p role="alert">{t('loadError')}</p>
+    <button type="button" disabled={busy} onClick={retryLoad}>{t('retry')}</button>
     <button type="button" disabled={busy} onClick={openSpaceSetup}>{t('configureSpaces')}</button>
     {spaceSetupPanel}
   </section>
   if (snapshot === undefined) return <p role="status">{t('loading')}</p>
   return <section className="dsh-mmem-settings">
-    {failed ? <p role="alert">{t('loadError')}</p> : null}
+    {failed ? <div>
+      <p role="alert">{t('loadError')}</p>
+      <button type="button" disabled={busy} onClick={retryLoad}>{t('retry')}</button>
+    </div> : null}
+    <header>
+      <h2>{t('settingsTitle')}</h2>
+      <p>{t('settingsDescription')}</p>
+    </header>
     <h3>{t('activeSpace')}</h3>
-    <p>{snapshot.activeSpace.spaceId} · {snapshot.activeSpace.access}</p>
+    <p>{snapshot.activeSpace.spaceId} · {accessLabel(snapshot.activeSpace.access, t)}</p>
     <button type="button" disabled={busy} onClick={openApprovalSettings}>
       {t('configureApproval')}
     </button>
@@ -606,46 +742,46 @@ function SessionMemorySettingsTab({
       setAppliedFilters({ ...filters })
     }}>
       <strong>{t('filters')}</strong>
-      <input
-        type="search"
-        aria-label={t('searchQuery')}
-        value={filters.query}
-        onChange={event => { setFilters(value => ({ ...value, query: event.target.value })) }}
-      />
-      <select
-        aria-label={t('memoryKind')}
-        value={filters.memoryKind}
-        onChange={event => {
-          setFilters(value => ({ ...value, memoryKind: event.target.value as MemoryFilterStateV1['memoryKind'] }))
-        }}
-      >
-        <option value="">{t('allKinds')}</option>
-        {MEMORY_KINDS.map(kind => <option key={kind} value={kind}>{kind}</option>)}
-      </select>
-      <select
-        aria-label={t('visibility')}
-        value={filters.visibility}
-        onChange={event => {
-          setFilters(value => ({ ...value, visibility: event.target.value as MemoryFilterStateV1['visibility'] }))
-        }}
-      >
-        <option value="">{t('allVisibilities')}</option>
-        <option value="personal">personal</option>
-        <option value="confidential">confidential</option>
-      </select>
-      <select
-        aria-label={t('candidateStatus')}
-        value={filters.candidateStatus}
-        onChange={event => {
-          setFilters(value => ({
-            ...value,
-            candidateStatus: event.target.value as MemoryFilterStateV1['candidateStatus'],
-          }))
-        }}
-      >
-        <option value="all">{t('allStatuses')}</option>
-        {CANDIDATE_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
-      </select>
+      <label>{t('searchQuery')}<input
+          type="search"
+          aria-label={t('searchQuery')}
+          value={filters.query}
+          onChange={event => { setFilters(value => ({ ...value, query: event.target.value })) }}
+        /></label>
+      <label>{t('memoryKind')}<select
+          aria-label={t('memoryKind')}
+          value={filters.memoryKind}
+          onChange={event => {
+            setFilters(value => ({ ...value, memoryKind: event.target.value as MemoryFilterStateV1['memoryKind'] }))
+          }}
+        >
+          <option value="">{t('allKinds')}</option>
+          {MEMORY_KINDS.map(kind => <option key={kind} value={kind}>{memoryKindLabel(kind, t)}</option>)}
+        </select></label>
+      <label>{t('visibility')}<select
+          aria-label={t('visibility')}
+          value={filters.visibility}
+          onChange={event => {
+            setFilters(value => ({ ...value, visibility: event.target.value as MemoryFilterStateV1['visibility'] }))
+          }}
+        >
+          <option value="">{t('allVisibilities')}</option>
+          <option value="personal">{t('visibilityPersonal')}</option>
+          <option value="confidential">{t('visibilityConfidential')}</option>
+        </select></label>
+      <label>{t('candidateStatus')}<select
+          aria-label={t('candidateStatus')}
+          value={filters.candidateStatus}
+          onChange={event => {
+            setFilters(value => ({
+              ...value,
+              candidateStatus: event.target.value as MemoryFilterStateV1['candidateStatus'],
+            }))
+          }}
+        >
+          <option value="all">{t('allStatuses')}</option>
+          {CANDIDATE_STATUSES.map(status => <option key={status} value={status}>{candidateStatusLabel(status, t)}</option>)}
+        </select></label>
       <button type="submit">{t('applyFilters')}</button>
     </form>
     {approvalSettings === undefined || approvalDraft === undefined ? null : <fieldset>
@@ -658,7 +794,7 @@ function SessionMemorySettingsTab({
           saveApprovalSettings()
         }}
       >
-        <select
+        <label>{t('approvalMode')}<select
           aria-label={t('approvalMode')}
           value={approvalDraft.mode}
           onChange={event => {
@@ -667,26 +803,26 @@ function SessionMemorySettingsTab({
               : { ...value, mode: event.target.value as ApprovalPolicyDraftV1['mode'] })
           }}
         >
-          <option value="manual">manual</option>
-          <option value="scheduled-auto">scheduled-auto</option>
-        </select>
+          <option value="manual">{t('approvalManual')}</option>
+          <option value="scheduled-auto">{t('approvalScheduled')}</option>
+        </select></label>
         {approvalDraft.mode === 'scheduled-auto' ? <>
-          <input
+          <label>{t('approvalTimeZone')}<input
             type="text"
             aria-label={t('approvalTimeZone')}
             value={approvalDraft.timeZone}
             onChange={event => {
               setApprovalDraft(value => value === undefined ? value : { ...value, timeZone: event.target.value })
             }}
-          />
-          <input
+          /></label>
+          <label>{t('approvalLocalTime')}<input
             type="time"
             aria-label={t('approvalLocalTime')}
             value={approvalDraft.localTime}
             onChange={event => {
               setApprovalDraft(value => value === undefined ? value : { ...value, localTime: event.target.value })
             }}
-          />
+          /></label>
         </> : null}
         <button
           type="submit"
@@ -723,9 +859,9 @@ function SessionMemorySettingsTab({
               : { ...value, mode: event.target.value as InterSpaceModeV1 })
           }}
         >
-          <option value="isolated">isolated</option>
-          <option value="selective">selective</option>
-          <option value="federated">federated</option>
+          <option value="isolated">{t('sharingIsolated')}</option>
+          <option value="selective">{t('sharingSelective')}</option>
+          <option value="federated">{t('sharingFederated')}</option>
         </select>
         {sharingDraft.mode === 'selective' ? <fieldset>
           <legend>{t('spaceShareGrants')}</legend>
@@ -746,7 +882,7 @@ function SessionMemorySettingsTab({
           {MEMORY_KINDS.map(kind => <label key={kind}>
             <input
               type="checkbox"
-              aria-label={`${t('sharedMemoryKind')}: ${kind}`}
+              aria-label={`${t('sharedMemoryKind')}: ${memoryKindLabel(kind, t)}`}
               checked={grantDraft.memoryKinds.includes(kind)}
               onChange={event => {
                 setGrantDraft(value => value === undefined ? value : {
@@ -756,12 +892,12 @@ function SessionMemorySettingsTab({
                     : value.memoryKinds.filter(item => item !== kind),
                 })
               }}
-            />{kind}
+            />{memoryKindLabel(kind, t)}
           </label>)}
           {(['personal', 'confidential'] as const).map(visibility => <label key={visibility}>
             <input
               type="checkbox"
-              aria-label={`${t('sharedVisibility')}: ${visibility}`}
+              aria-label={`${t('sharedVisibility')}: ${visibilityLabel(visibility, t)}`}
               checked={grantDraft.visibilities.includes(visibility)}
               onChange={event => {
                 setGrantDraft(value => value === undefined ? value : {
@@ -771,7 +907,7 @@ function SessionMemorySettingsTab({
                     : value.visibilities.filter(item => item !== visibility),
                 })
               }}
-            />{visibility}
+            />{visibilityLabel(visibility, t)}
           </label>)}
           <button type="button" disabled={busy || sharingSettings.activeSpace.access !== 'read-write'} onClick={addGrant}>
             {t('addGrant')}
@@ -839,7 +975,7 @@ function SessionMemorySettingsTab({
         ? <p>{t('noRecords')}</p>
         : snapshot.management.records.map(record => <article key={record.id}>
             <p>{record.content}</p>
-            <small>{record.memoryKind} · {record.visibility} · {record.status}</small>
+            <small>{memoryKindLabel(record.memoryKind, t)} · {visibilityLabel(record.visibility, t)} · {recordStatusLabel(record.status, t)}</small>
             <div>
               <button type="button" disabled={busy} onClick={() => { showSource('record', record.id) }}>
                 {t('viewSource')}
@@ -853,12 +989,28 @@ function SessionMemorySettingsTab({
         ? <p>{t('noCandidates')}</p>
         : snapshot.management.candidates.map(candidate => <article key={candidate.id}>
             <p>{candidate.content}</p>
-            <small>{candidate.memoryKind} · {candidate.visibility} · {candidate.status}</small>
+            <small>{memoryKindLabel(candidate.memoryKind, t)} · {visibilityLabel(candidate.visibility, t)} · {candidateStatusLabel(candidate.status, t)}</small>
             <div>
               <button type="button" disabled={busy} onClick={() => { showSource('candidate', candidate.id) }}>
                 {t('viewSource')}
               </button>
               {candidate.status === 'pending' ? <>
+              <label className="dsh-mmem-switch">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label={t('analyzeRelationships')}
+                  checked={relationshipAnalysis.includes(candidate.id)}
+                  disabled={busy || snapshot.activeSpace.access !== 'read-write'}
+                  onChange={event => {
+                    setRelationshipAnalysis(value => event.target.checked
+                      ? [...value, candidate.id]
+                      : value.filter(id => id !== candidate.id))
+                  }}
+                />
+                {t('analyzeRelationships')}
+              </label>
+              <small className="dsh-mmem-relationship-hint">{t('relationshipAnalysisHint')}</small>
               <label>
                 <input
                   type="checkbox"
@@ -950,7 +1102,7 @@ function SessionMemorySettingsTab({
               : { ...value, memoryKind: event.target.value as MemoryKind })
           }}
         >
-          {MEMORY_KINDS.map(kind => <option key={kind} value={kind}>{kind}</option>)}
+          {MEMORY_KINDS.map(kind => <option key={kind} value={kind}>{memoryKindLabel(kind, t)}</option>)}
         </select>
         <select
           aria-label={t('editVisibility')}
@@ -961,8 +1113,8 @@ function SessionMemorySettingsTab({
               : { ...value, visibility: event.target.value as MemoryVisibility })
           }}
         >
-          <option value="personal">personal</option>
-          <option value="confidential">confidential</option>
+          <option value="personal">{t('visibilityPersonal')}</option>
+          <option value="confidential">{t('visibilityConfidential')}</option>
         </select>
         <button type="submit" disabled={busy || editDraft.content.trim() === ''}>{t('saveEdit')}</button>
         <button type="button" disabled={busy} onClick={() => { setEditDraft(undefined) }}>{t('cancel')}</button>
@@ -994,7 +1146,7 @@ function SessionMemorySettingsTab({
               : { ...value, memoryKind: event.target.value as MemoryKind })
           }}
         >
-          {MEMORY_KINDS.map(kind => <option key={kind} value={kind}>{kind}</option>)}
+          {MEMORY_KINDS.map(kind => <option key={kind} value={kind}>{memoryKindLabel(kind, t)}</option>)}
         </select>
         <select
           aria-label={t('mergeVisibility')}
@@ -1005,8 +1157,8 @@ function SessionMemorySettingsTab({
               : { ...value, visibility: event.target.value as MemoryVisibility })
           }}
         >
-          <option value="personal">personal</option>
-          <option value="confidential">confidential</option>
+          <option value="personal">{t('visibilityPersonal')}</option>
+          <option value="confidential">{t('visibilityConfidential')}</option>
         </select>
         <button type="submit" disabled={busy || mergeDraft.content.trim() === ''}>{t('saveMerge')}</button>
         <button type="button" disabled={busy} onClick={() => { setMergeDraft(undefined) }}>{t('cancel')}</button>
@@ -1017,7 +1169,8 @@ function SessionMemorySettingsTab({
         ? t('partialSuccess')
         : t('batchComplete')}</legend>
       {batchResult.results.map(result => <small key={result.candidateId}>
-        {result.candidateId} · {result.status}{result.code === undefined ? '' : ` · ${result.code}`}
+        {result.candidateId} · {result.status === 'succeeded' ? t('batchSucceeded') : t('batchFailed')}
+        {result.code === undefined ? '' : ` · ${result.code}`}
       </small>)}
     </fieldset>}
     {sourceView === undefined ? null : <fieldset>
@@ -1043,7 +1196,7 @@ function SessionMemorySettingsTab({
     {conflict === undefined ? null : <fieldset>
       <legend>{t('conflict')}</legend>
       {conflict.relationships.map(relationship => <div key={relationship.memoryId}>
-        <small>{relationship.relation} · {relationship.memoryId} · {relationship.reason}</small>
+        <small>{assessmentLabel(relationship.relation, t)} · {relationship.memoryId} · {assessmentReasonLabel(relationship.reason, t)}</small>
         <button
           type="button"
           disabled={busy}
