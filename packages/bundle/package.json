@@ -79,6 +79,10 @@
       "types": "./lib/memory/approval-policy.d.ts",
       "default": "./lib/memory/approval-policy.js"
     },
+    "./approval-schedule": {
+      "types": "./lib/memory/approval-schedule.d.ts",
+      "default": "./lib/memory/approval-schedule.js"
+    },
     "./settings-ui": {
       "types": "./lib/settings-ui/index.d.ts",
       "default": "./lib/settings-ui/index.js"

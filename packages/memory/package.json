@@ -82,6 +82,10 @@
     "./approval-policy": {
       "types": "./lib/approval-policy.d.ts",
       "default": "./lib/approval-policy.js"
+    },
+    "./approval-schedule": {
+      "types": "./lib/approval-schedule.d.ts",
+      "default": "./lib/approval-schedule.js"
     }
   },
   "scripts": {

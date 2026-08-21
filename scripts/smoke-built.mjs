@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 
-const [principalLocal, memory, settingsHost, settingsClient, settingsUi, settingsUiClient] = await Promise.all([
+const [approvalSchedule, principalLocal, memory, settingsHost, settingsClient, settingsUi, settingsUiClient] = await Promise.all([
+  import('../packages/memory/lib/approval-schedule.js'),
   import('../packages/memory/lib/principal-local.js'),
   import('../packages/memory/lib/index.js'),
   import('../packages/memory/lib/settings-host.js'),
@@ -9,6 +10,9 @@ const [principalLocal, memory, settingsHost, settingsClient, settingsUi, setting
   readFile(new URL('../packages/settings-ui/lib/client.js', import.meta.url), 'utf8'),
 ])
 
+if (typeof approvalSchedule.calculateMemoryApprovalScheduleV1 !== 'function') {
+  throw new Error('built Memory package is missing calculateMemoryApprovalScheduleV1')
+}
 if (principalLocal.name !== 'dsh-mmem-principal-local') {
   throw new Error(`unexpected principal Adapter name: ${String(principalLocal.name)}`)
 }
