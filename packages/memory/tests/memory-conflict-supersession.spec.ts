@@ -7,8 +7,9 @@ import { PERSONAL_COMPANION_ACCESS } from './fixtures.js'
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'mistymoon-conflict-'))
+  const path = join(root, 'memory.jsonl')
   const archive = await openMemoryArchive({
-    path: join(root, 'memory.jsonl'),
+    path,
     now: () => new Date('2026-08-20T12:00:00.000Z'),
   })
   const current = await archive.observeExplicit({
@@ -25,7 +26,7 @@ async function fixture() {
     visibility: 'personal',
     memoryKind: 'preference',
   })
-  return { archive, current, candidate }
+  return { archive, current, candidate, path }
 }
 
 describe('memory conflict and supersession', () => {
@@ -72,5 +73,29 @@ describe('memory conflict and supersession', () => {
     expect(approved.supersedesMemoryId).toBeUndefined()
     expect(archive.list({ context: PERSONAL_COMPANION_ACCESS }).map(item => item.id))
       .toEqual(expect.arrayContaining([current.id, approved.id]))
+  })
+
+  it('atomically confirms Owner-selected semantic relationships with Candidate approval', async () => {
+    const { archive, current, candidate, path } = await fixture()
+    const approved = await archive.approveCandidate({
+      context: PERSONAL_COMPANION_ACCESS,
+      candidateId: candidate.id,
+      sourceMessageId: 'approve-with-relationship',
+      resolution: { kind: 'keep-both' },
+      relationships: [{ targetMemoryId: current.id, relation: 'contradicts' }],
+    })
+
+    expect(archive.listRelationships({ context: PERSONAL_COMPANION_ACCESS })).toEqual([
+      expect.objectContaining({
+        sourceMemoryId: approved.id,
+        targetMemoryId: current.id,
+        relation: 'contradicts',
+        sourceCandidateId: candidate.id,
+      }),
+    ])
+    await archive.dispose()
+
+    const reopened = await openMemoryArchive({ path })
+    expect(reopened.listRelationships({ context: PERSONAL_COMPANION_ACCESS })).toHaveLength(1)
   })
 })

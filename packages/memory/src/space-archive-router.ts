@@ -245,6 +245,10 @@ class SpaceArchiveRouter implements MemorySpaceArchiveRouterV1 {
         read(input)
         return archive.listCandidates(input)
       },
+      listRelationships: input => {
+        read(input)
+        return archive.listRelationships(input)
+      },
       assessCandidate: input => {
         read(input)
         return archive.assessCandidate(input)

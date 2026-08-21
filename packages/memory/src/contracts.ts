@@ -55,6 +55,28 @@ export interface MemoryCandidate extends ScopedMemoryFields {
   }
 }
 
+export type MemorySemanticRelationshipTypeV1 = 'related-to' | 'elaborates' | 'contradicts'
+
+/** Owner-confirmed semantic edge between two governed Memories. */
+export interface ConfirmedMemoryRelationshipV1 {
+  schemaVersion: 1
+  id: string
+  ownerId: string
+  scope: MemoryScopeV1
+  sourceMemoryId: string
+  targetMemoryId: string
+  relation: MemorySemanticRelationshipTypeV1
+  sourceCandidateId: string
+  sourceMessageId: string
+  createdAt: string
+}
+
+/** One Owner-selected relationship to confirm with Candidate approval. */
+export interface MemoryRelationshipSelectionV1 {
+  targetMemoryId: string
+  relation: MemorySemanticRelationshipTypeV1
+}
+
 /** Memory-owned atomic ingestion of one Provider result for one selected source. */
 export interface ExtractedMemoryCandidateBatch extends TrustedMemoryRequest {
   sourceMessageId: string
@@ -87,7 +109,10 @@ export interface MemoryCandidateDecision extends TrustedMemoryRequest {
   resolution?:
     | { kind: 'keep-both' }
     | { kind: 'supersede'; memoryId: string }
+  relationships?: readonly MemoryRelationshipSelectionV1[]
 }
+
+export interface MemoryRelationshipListV1 extends TrustedMemoryRequest {}
 
 /** Request an explainable conflict view for one pending candidate. */
 export interface MemoryCandidateAssessment extends TrustedMemoryRequest {
@@ -350,6 +375,7 @@ export interface CompanionMemoryArchive {
   proposeExtracted(input: ExtractedMemoryCandidateBatch): Promise<MemoryCandidate[]>
   listCandidates(input: MemoryCandidateList): MemoryCandidate[]
   assessCandidate(input: MemoryCandidateAssessment): MemoryConflictAssessmentV1
+  listRelationships(input: MemoryRelationshipListV1): ConfirmedMemoryRelationshipV1[]
   editCandidate(input: MemoryCandidateRevision): Promise<MemoryCandidate>
   mergeCandidates(input: MemoryCandidateRevision): Promise<MemoryCandidate>
   listGovernanceAudit(input: MemoryGovernanceAuditList): MemoryGovernanceAuditEntryV1[]
@@ -366,6 +392,7 @@ export interface CompanionMemoryArchive {
 export interface MemoryGovernanceService {
   listCandidates(input?: Omit<MemoryCandidateList, 'context'>): MemoryCandidate[]
   assessCandidate(input: Omit<MemoryCandidateAssessment, 'context'>): MemoryConflictAssessmentV1
+  listRelationships(input?: Omit<MemoryRelationshipListV1, 'context'>): ConfirmedMemoryRelationshipV1[]
   editCandidate(input: Omit<MemoryCandidateRevision, 'context'>): Promise<MemoryCandidate>
   mergeCandidates(input: Omit<MemoryCandidateRevision, 'context'>): Promise<MemoryCandidate>
   listGovernanceAudit(input?: Omit<MemoryGovernanceAuditList, 'context'>): MemoryGovernanceAuditEntryV1[]

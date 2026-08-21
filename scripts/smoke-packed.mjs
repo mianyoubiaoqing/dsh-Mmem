@@ -53,6 +53,8 @@ function assertManifest(manifest) {
   for (const dependency of [
     '@deepseek-ai/dsh-client-connection',
     '@deepseek-ai/dsh-client-locale',
+    '@deepseek-ai/dsh-client-ui-layout',
+    '@deepseek-ai/dsh-client-ui-sidebar',
     '@deepseek-ai/dsh-client-ui-settings-plugins',
   ]) {
     if (!Array.isArray(clientInject) || !clientInject.includes(dependency)) {

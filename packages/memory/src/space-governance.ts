@@ -50,6 +50,7 @@ export function createMemoryGovernanceService(
 ): MemoryGovernanceService {
   return {
     listCandidates: input => archive.listCandidates({ context, ...input }),
+    listRelationships: input => archive.listRelationships({ context, ...input }),
     assessCandidate: input => archive.assessCandidate({ context, ...input }),
     editCandidate: input => archive.editCandidate({ context, ...input }),
     mergeCandidates: input => archive.mergeCandidates({ context, ...input }),

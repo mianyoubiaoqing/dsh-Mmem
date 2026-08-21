@@ -4,7 +4,7 @@
 
 本插件只使用 DSH 的公开扩展点。DSH 仍然拥有 Agent Runtime、Session、Workspace、工具、权限和模型路由；dsh-Mmem 不修改 DSH 源码，也不创建与 DSH 平行的 Workspace 身份。
 
-> 当前版本是公开 alpha：[`@mistymoon/dsh-mmem@0.0.1-alpha.0`](https://www.npmjs.com/package/@mistymoon/dsh-mmem)。完整开发与发行验收基于 DSH `0.1.0-rc.8`；DSH `rc.7` 也完成了独立 clean Profile 的安装和 Web Settings discovery 验证。建议先在中性测试数据或可恢复副本上试用。
+> 当前候选版本是 `@mistymoon/dsh-mmem@0.0.1-alpha.1`。完整开发与发行验收基于 DSH `0.1.0-rc.8`；公开 peer range 继续保留此前验证过的 `rc.7`，但本次新增的侧栏与图谱 UI 只在 `rc.8` 完成了完整验证。建议先在中性测试数据或可恢复副本上试用。
 
 ## 安装与下载
 
@@ -17,7 +17,7 @@
 普通用户应通过 DSH 插件命令安装已经验收的确切版本：
 
 ```powershell
-dsh plugin --profile web add @mistymoon/dsh-mmem@0.0.1-alpha.0
+dsh plugin --profile web add @mistymoon/dsh-mmem@0.0.1-alpha.1
 ```
 
 希望跟随 alpha dist-tag 时可以使用：
@@ -29,13 +29,13 @@ dsh plugin --profile web add @mistymoon/dsh-mmem@alpha
 如果只想把 npm 包下载为 `.tgz`、暂不安装：
 
 ```powershell
-npm pack @mistymoon/dsh-mmem@0.0.1-alpha.0
+npm pack @mistymoon/dsh-mmem@0.0.1-alpha.1
 ```
 
 自行维护 Cordis/DSH 组合的集成开发者也可以把它作为依赖安装：
 
 ```powershell
-npm install @mistymoon/dsh-mmem@0.0.1-alpha.0
+npm install @mistymoon/dsh-mmem@0.0.1-alpha.1
 ```
 
 公开包已经声明 `dsh.bundle.patch`、Host 入口与 Web client discovery；使用 DSH 插件命令时不需要手工修改已安装的包。插件在 Harness 进程中运行，安装前应先审阅本仓库和包内的 `cordis.patch.yml`。
@@ -43,7 +43,7 @@ npm install @mistymoon/dsh-mmem@0.0.1-alpha.0
 ## 首次使用
 
 1. 在 DSH Web 中打开一个属于目标 DSH Workspace 的 live Session。
-2. 进入 Memory Settings。若该 Workspace 尚未绑定 Memory Space，页面会显示首次设置。
+2. 进入 Memory Settings。若该 Workspace 尚未绑定 Memory Space，页面会直接显示首次设置，不需要刷新会话。
 3. 创建一个 Memory Space，或把已有 Space 绑定到当前 Workspace。
 4. 选择 Binding 是只读还是读写；需要接收新 Observation/Candidate 时，将一个读写 Space 设为该 Workspace 的 Default Write Space。
 5. 审批模式默认是 `manual`。只有在用户显式保存 `scheduled-auto`、IANA 时区和当地审核时间后，定时审核才会启动。
@@ -54,6 +54,8 @@ Workspace 身份只取自 live DSH `SessionHeader.cwd`。浏览器不能自行�
 
 - **可追溯治理**：Confirmed Memory 保留 Owner、Memory Kind、可见性、来源消息 ID、时间与 append-only revision lineage；纠正通过新记录替代旧记录，不静默改写历史。
 - **候选审核**：支持搜索、筛选、人工批准/拒绝、编辑、合并、冲突处理和 partial-success 批量决策。Pending、Rejected 和 Import Draft 永不参与召回。
+- **记忆浏览器**：侧栏底部的“记忆”按钮打开 Session-bound 浏览器，可在按记忆类型分组的目录视图和语义关系图谱之间切换，并支持搜索与图谱缩放。
+- **无需 embedding 的语义关系**：候选审批卡片可用滑块选择是否保存本地可解释规则建议的 `相关` / `矛盾` 关系；关系与正式记忆在同一 Archive 事务内确认，默认不影响召回。
 - **安全召回**：默认使用本地 BM25，并在检索前后执行 Owner、authority、scope、有效期、visibility 与 disclosure gate；模型看到的 Recall Snapshot 会写入 DSH Session 日志。
 - **多个 Memory Spaces**：每个 Space 使用物理隔离的 Archive；一个 DSH Workspace 可绑定 Space，一个 Space 也可由多个 DSH Workspaces 共用。
 - **可治理的跨 Space 召回**：跨空间关系只影响只读召回，不复制记忆、不改变 Source Space，也不授予修改来源记录的权限。
@@ -98,6 +100,8 @@ Borrowed Recall 始终保留 Source Space、授权关系和 policy revision，�
 - 这是 alpha 版本，尚未声明兼容 DSH `rc.9`、后续 rc 或 stable；扩大范围前需要重新跑完整兼容矩阵。
 - 自动候选抽取 seam 已存在，但默认不捆绑抽取 Provider；候选仍可由受治理的 DSH 工具提出。
 - 默认检索是本地 BM25；PageIndex 和 graph Adapter 默认关闭，远程引擎、embedding 与 reranking 不属于当前基线。
+- 当前语义关系建议只使用本地确定性冲突与词法评估，不等同于向量相似度或模型级语义理解。Owner 的显式审批才使关系成为治理事实；`补充` 类型已进入存储和展示协议，但当前本地建议器不会自动判定它。
+- 写入首个 `relationship-confirmed` 事件后，旧版插件无法读取新增的 Archive 事件类型；升级前应保留可恢复备份，且不支持直接降级读取该 Archive。
 - Lifecycle confirmation plan 是进程内对象，重启后需要依据重放的 Archive 重新创建。
 - Standalone migration 支持事务级回滚；已导入批次目前没有业务级“整批撤销”命令，单条记录仍可通过 append-only forget 治理。
 
@@ -156,7 +160,8 @@ npm publish .\.artifacts\npm\mistymoon-dsh-mmem-VERSION.tgz --tag alpha --access
 
 ## 兼容性、调研与许可证
 
-- 完整发行验收：[`research/release-readiness-0.0.1-alpha.0.md`](research/release-readiness-0.0.1-alpha.0.md)
+- 当前发行验收：[`research/release-readiness-0.0.1-alpha.1.md`](research/release-readiness-0.0.1-alpha.1.md)
+- 上一版本发行验收：[`research/release-readiness-0.0.1-alpha.0.md`](research/release-readiness-0.0.1-alpha.0.md)
 - DSH 记忆插件生态、差异化与采用判断：[`research/dsh-memory-plugin-ecosystem-2026-08-21.md`](research/dsh-memory-plugin-ecosystem-2026-08-21.md)
 - 问题反馈：[GitHub Issues](https://github.com/mianyoubiaoqing/dsh-Mmem/issues)
 

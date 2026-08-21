@@ -2,7 +2,12 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { lock as acquireProperLock } from 'proper-lockfile'
-import type { MemoryCandidate, MemoryRecord } from '../contracts.js'
+import type {
+  ConfirmedMemoryRelationshipV1,
+  MemoryCandidate,
+  MemoryRecord,
+  MemorySemanticRelationshipTypeV1,
+} from '../contracts.js'
 import { parseCandidateExtractionReceiptV1 } from '../candidate-extraction.js'
 import {
   memoryScopeEquals,
@@ -58,8 +63,24 @@ export interface MemoryLifecycleEvent {
   sourceMessageId: string
 }
 
+export interface MemoryRelationshipConfirmedEvent {
+  schemaVersion: 2
+  event: 'relationship-confirmed'
+  id: string
+  createdAt: string
+  ownerId: string
+  scope: MemoryScopeV1
+  observationId: string
+  sourceMemoryId: string
+  targetMemoryId: string
+  relation: MemorySemanticRelationshipTypeV1
+  sourceCandidateId: string
+  sourceMessageId: string
+}
+
 export type MemoryDomainEvent = MemoryObservationV1 | MemoryRecord | MemoryCandidate
   | MemoryForgottenEvent | MemoryCandidateResolutionEvent | MemoryLifecycleEvent
+  | MemoryRelationshipConfirmedEvent
 
 export type ArchiveIssueCode =
   | 'trailing-partial-transaction'
@@ -110,6 +131,7 @@ export interface SourceUse {
   recordedAt?: string
   validFrom?: string
   validTo?: string
+  relationships?: string[]
 }
 
 export interface FoldedMemoryState {
@@ -117,6 +139,8 @@ export interface FoldedMemoryState {
   candidates: MemoryCandidate[]
   byId: Map<string, MemoryRecord>
   candidateById: Map<string, MemoryCandidate>
+  relationships: ConfirmedMemoryRelationshipV1[]
+  relationshipById: Map<string, ConfirmedMemoryRelationshipV1>
   observations: Map<string, MemoryObservationV1>
   eventIds: Set<string>
   sources: Map<string, SourceUse>
@@ -235,6 +259,7 @@ export class MemoryArchiveError extends Error {
       | 'MEMORY_SCOPE_MISMATCH'
       | 'MEMORY_CONFLICT_DECISION_REQUIRED'
       | 'MEMORY_CONFLICT_TARGET_INVALID'
+      | 'MEMORY_RELATIONSHIP_TARGET_INVALID'
       | 'MEMORY_ARCHIVE_DISPOSED'
       | 'MEMORY_DISPOSE_TIMEOUT',
     options?: ErrorOptions,
@@ -542,6 +567,28 @@ function parseDomainEvent(value: unknown, line: number, offset: number): MemoryD
         sourceMessageId: requiredString(entry.sourceMessageId),
       }
     }
+    if (entry.event === 'relationship-confirmed') {
+      exactDomainKeys(entry, [
+        'schemaVersion', 'event', 'id', 'createdAt', 'ownerId', 'scope', 'observationId',
+        'sourceMemoryId', 'targetMemoryId', 'relation', 'sourceCandidateId', 'sourceMessageId',
+      ])
+      if (entry.relation !== 'related-to' && entry.relation !== 'elaborates'
+        && entry.relation !== 'contradicts') throw new Error('unsupported Memory relationship')
+      return {
+        schemaVersion: 2,
+        event: 'relationship-confirmed',
+        id: requiredString(entry.id),
+        createdAt: timestamp(entry.createdAt),
+        ownerId: requiredString(entry.ownerId),
+        scope: parseMemoryScopeV1(entry.scope),
+        observationId: requiredString(entry.observationId),
+        sourceMemoryId: requiredString(entry.sourceMemoryId),
+        targetMemoryId: requiredString(entry.targetMemoryId),
+        relation: entry.relation,
+        sourceCandidateId: requiredString(entry.sourceCandidateId),
+        sourceMessageId: requiredString(entry.sourceMessageId),
+      }
+    }
     if (entry.event === 'candidate-resolution') {
       exactDomainKeys(entry, [
         'schemaVersion', 'event', 'id', 'createdAt', 'ownerId', 'scope', 'observationId', 'candidateId',
@@ -657,6 +704,8 @@ function emptyState(): FoldedMemoryState {
     candidates: [],
     byId: new Map(),
     candidateById: new Map(),
+    relationships: [],
+    relationshipById: new Map(),
     observations: new Map(),
     eventIds: new Set(),
     sources: new Map(),
@@ -687,11 +736,17 @@ function cloneCandidate(candidate: MemoryCandidate): MemoryCandidate {
 export function cloneFoldedState(source: FoldedMemoryState): FoldedMemoryState {
   const records = source.records.map(cloneMemory)
   const candidates = source.candidates.map(cloneCandidate)
+  const relationships = source.relationships.map(relationship => ({
+    ...relationship,
+    scope: { ...relationship.scope },
+  }))
   return {
     records,
     candidates,
     byId: new Map(records.map(memory => [memory.id, memory])),
     candidateById: new Map(candidates.map(candidate => [candidate.id, candidate])),
+    relationships,
+    relationshipById: new Map(relationships.map(relationship => [relationship.id, relationship])),
     observations: new Map([...source.observations].map(([id, observation]) => [id, {
       ...observation,
       scope: { ...observation.scope },
@@ -702,6 +757,7 @@ export function cloneFoldedState(source: FoldedMemoryState): FoldedMemoryState {
       ...use,
       ...(use.candidateIds === undefined ? {} : { candidateIds: [...use.candidateIds] }),
       ...(use.memoryIds === undefined ? {} : { memoryIds: [...use.memoryIds] }),
+      ...(use.relationships === undefined ? {} : { relationships: [...use.relationships] }),
     }])),
   }
 }
@@ -807,6 +863,45 @@ function foldEvent(
       rankMultiplier: event.rankMultiplier,
       updatedAt: event.createdAt,
     }
+    return
+  }
+  if ('event' in event && event.event === 'relationship-confirmed') {
+    const { observation, sourceKey } = eventObservation(state, event, line, offset)
+    const source = state.byId.get(event.sourceMemoryId)
+    const target = state.byId.get(event.targetMemoryId)
+    const sourceObservation = source === undefined ? undefined : state.observations.get(source.observationId)
+    const targetObservation = target === undefined ? undefined : state.observations.get(target.observationId)
+    if (source === undefined || target === undefined || source.id === target.id
+      || source.status !== 'confirmed' || target.status !== 'confirmed'
+      || source.ownerId !== event.ownerId || target.ownerId !== event.ownerId
+      || !memoryScopeEquals(source.scope, event.scope) || !memoryScopeEquals(target.scope, event.scope)
+      || source.sourceCandidateId !== event.sourceCandidateId
+      || source.sourceMessageId !== event.sourceMessageId
+      || sourceObservation?.authority !== observation.authority
+      || targetObservation?.authority !== observation.authority
+      || state.relationships.some(relationship => relationship.sourceMemoryId === source.id
+        && relationship.targetMemoryId === target.id && relationship.relation === event.relation)) {
+      issue('invalid-state-transition', line, offset)
+    }
+    const use = state.sources.get(sourceKey)
+    if (use?.kind !== 'approve' || use.transactionId !== transactionId || use.memoryId !== source.id) {
+      issue('invalid-state-transition', line, offset)
+    }
+    use.relationships = [...(use.relationships ?? []), `${target.id}:${event.relation}`]
+    const relationship: ConfirmedMemoryRelationshipV1 = {
+      schemaVersion: 1,
+      id: event.id,
+      ownerId: event.ownerId,
+      scope: event.scope,
+      sourceMemoryId: event.sourceMemoryId,
+      targetMemoryId: event.targetMemoryId,
+      relation: event.relation,
+      sourceCandidateId: event.sourceCandidateId,
+      sourceMessageId: event.sourceMessageId,
+      createdAt: event.createdAt,
+    }
+    state.relationships.push(relationship)
+    state.relationshipById.set(relationship.id, relationship)
     return
   }
   if ('event' in event && event.event === 'candidate') {
