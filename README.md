@@ -28,6 +28,7 @@
 - 第十五阶段 Space sharing catalog：单独的版本化目录以 exact revision 保存 Owner 的 `isolated`、`selective` 或 `federated` 模式。Selective Grant 是带 Memory Kind/visibility 过滤的单向、只读、非传递授权；Federation 只包含显式成员，且一个 Space 最多属于一个 Federation。解析器只返回 Active Space 的直接授权 Source Space 与 policy receipt，不改变 DSH Workspace Binding 或记忆归属。
 - 第十六阶段 Borrowed Recall：Workspace Binding 仍只选择一个 Active Space；Router 依据 sharing catalog 从物理隔离的 Source Archive 执行只读召回，在 Archive 原有 Owner/scope/disclosure gate 后应用 Grant 过滤，然后对本地与借用结果重新执行一次全局数量/字符预算。每条借用结果携带 Source Space、relation 与 policy revision；策略在读取期间变化时丢弃全部借用结果，借用 ID 不能通过 Active Space facade 修改。
 - 第十七阶段共享 Settings：Memory-owned loopback Host 只在 live DSH Session 成功解析 Active Space 后读取 Owner-bound sharing facade；浏览器不能提交 Owner、cwd、Workspace 或路径。Settings client 严格校验 Space/policy 响应并只发送 exact revision 与显式关系。UI 可切换三种模式、创建/移除带多种 Memory Kind/visibility 的单向 Grant，以及创建/移除多个成员不重叠的 Federation；只读 Active Space Binding 只能查看不能保存。
+- 第十八阶段首次设置：即使当前 DSH Workspace 尚无 Active Space，Owner-bound setup facade 也只依据 live Session 的 exact `SessionHeader.cwd` 列出当前 Workspace Bindings、创建 Memory Space，并把已有 Space 绑定到当前 DSH Workspace。浏览器不能提交 Owner 或 cwd；相同名称的重复创建与完全相同的重复 Binding 是幂等的。用户可在另一个 DSH Workspace 的 live Session 中绑定同一 Space，也可创建多个未自动互通的独立 Space。
 - npm 发布边界：内部 workspace 包继续私有；唯一安装包 `@mistymoon/dsh-mmem` 聚合 Memory、本地 principal Adapter、Settings Host 和 Settings UI，并声明官方 DSH bundle patch。
 
 ## 目录

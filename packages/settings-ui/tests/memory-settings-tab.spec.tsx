@@ -26,6 +26,104 @@ describe('dsh-Mmem Settings tab', () => {
     expect(call).not.toHaveBeenCalled()
   })
 
+  it('onboards a Memory Space for the current DSH Workspace without sending cwd', async () => {
+    const space = {
+      schemaVersion: 1 as const,
+      id: 'space-new-project',
+      ownerId: 'owner-fixture',
+      name: 'New Project',
+      createdAt: '2026-08-21T00:00:00.000Z',
+    }
+    let bound = false
+    const call = vi.fn(async (_channel: string, endpoint: string) => {
+      if (endpoint === 'memory/search') {
+        if (!bound) return { ok: false as const, error: { code: 'bad-request', message: 'no Active Space' } }
+        return {
+          ok: true as const,
+          value: {
+            schemaVersion: 1,
+            activeSpace: {
+              spaceId: space.id,
+              access: 'read-write' as const,
+              bindingRevision: 'binding-v1',
+            },
+            management: { schemaVersion: 1, records: [], candidates: [], audit: [] },
+          },
+        }
+      }
+      if (endpoint === 'spaces/get') return {
+        ok: true as const,
+        value: { schemaVersion: 1, spaces: [], bindings: [] },
+      }
+      if (endpoint === 'spaces/create') return {
+        ok: true as const,
+        value: { schemaVersion: 1, spaces: [space], bindings: [] },
+      }
+      if (endpoint === 'spaces/bind') {
+        bound = true
+        return {
+          ok: true as const,
+          value: {
+            schemaVersion: 1,
+            spaces: [space],
+            bindings: [{
+              schemaVersion: 1,
+              ownerId: 'owner-fixture',
+              dshWorkspaceCwd: 'D:\\workspaces\\new-project',
+              spaceId: space.id,
+              access: 'read-write' as const,
+              defaultWrite: true,
+              revision: 'binding-v1',
+              createdAt: '2026-08-21T00:01:00.000Z',
+            }],
+          },
+        }
+      }
+      throw new Error(`unexpected endpoint: ${endpoint}`)
+    })
+    const useSessions = <Selected,>(
+      selector: (snapshot: { current: string | undefined }) => Selected,
+    ): Selected => selector({ current: 'settings-session' })
+    let tree: ReturnType<typeof create> | undefined
+    await act(async () => {
+      tree = create(<DshMemorySettingsTab rpc={{ call }} useSessions={useSessions} t={key => `translated:${key}`} />)
+    })
+    const configure = tree?.root.findAllByType('button')
+      .find(button => button.children.includes('translated:configureSpaces'))
+    if (configure === undefined) throw new Error('expected Memory Space setup button')
+    await act(async () => {
+      configure.props.onClick()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:spaceName' })
+        .props.onChange({ target: { value: 'New Project' } })
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:createSpaceForm' })
+        .props.onSubmit({ preventDefault: vi.fn() })
+      await Promise.resolve()
+    })
+    await act(async () => {
+      tree?.root.findByProps({ 'aria-label': 'translated:bindSpaceForm' })
+        .props.onSubmit({ preventDefault: vi.fn() })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(call).toHaveBeenCalledWith(
+      '/dsh-mmem-settings',
+      'spaces/bind',
+      {
+        sessionId: 'settings-session',
+        spaceId: space.id,
+        access: 'read-write',
+        defaultWrite: true,
+      },
+      undefined,
+    )
+  })
+
   it('binds Memory search to the current DSH Session and renders the resolved Active Space', async () => {
     const call = vi.fn().mockResolvedValue({
       ok: true,

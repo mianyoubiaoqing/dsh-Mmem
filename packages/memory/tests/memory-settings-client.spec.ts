@@ -589,4 +589,48 @@ describe('dsh-Mmem Settings browser client', () => {
       undefined,
     )
   })
+
+  it('binds a Space to the Host-resolved current DSH Workspace without browser cwd', async () => {
+    const call = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        spaces: [{
+          schemaVersion: 1,
+          id: 'space-project',
+          ownerId: 'owner-fixture',
+          name: 'Project',
+          createdAt: '2026-08-21T00:00:00.000Z',
+        }],
+        bindings: [{
+          schemaVersion: 1,
+          ownerId: 'owner-fixture',
+          dshWorkspaceCwd: 'D:\\workspaces\\project',
+          spaceId: 'space-project',
+          access: 'read-write',
+          defaultWrite: true,
+          revision: 'binding-v1',
+          createdAt: '2026-08-21T00:01:00.000Z',
+        }],
+      },
+    })
+    const client = createMemorySettingsClient({ rpc: { call }, sessionId: 'settings-session' })
+
+    await expect(client.bindCurrentDshWorkspace({
+      spaceId: 'space-project',
+      access: 'read-write',
+      defaultWrite: true,
+    })).resolves.toMatchObject({ bindings: [{ spaceId: 'space-project' }] })
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      '/dsh-mmem-settings',
+      'spaces/bind',
+      {
+        sessionId: 'settings-session',
+        spaceId: 'space-project',
+        access: 'read-write',
+        defaultWrite: true,
+      },
+      undefined,
+    )
+  })
 })
